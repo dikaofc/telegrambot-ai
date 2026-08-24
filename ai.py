@@ -516,7 +516,7 @@ class AutoReply:
         if len(content) > 4000:
             content = content[:4000]
 
-        mode = self._detect_mode(chat_id, content)
+        mode = self.detect_mode(chat_id, content)
 
         async with self._lock:
             messages = [{"role": "system", "content": self._system(name, chat_id, mode)}]
