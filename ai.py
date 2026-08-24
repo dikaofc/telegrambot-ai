@@ -134,12 +134,16 @@ class TrainingDataLoader:
             logger.warning("gagal load training data dari Upstash: %s", e)
 
     def get_style_examples(self, chat_id: str | None = None, limit: int = 20) -> list[dict]:
-        """Ambil contoh gaya chat dari training data."""
-        if not self._cache:
+        """Ambil contoh gaya chat dari training data + corpus real-time."""
+        # Gabung cache Upstash + corpus real-time
+        data = self._cache + [
+            {"text": c["text"], "fromMe": c["fromMe"], "chat_id": c["chat_id"]}
+            for c in self.corpus
+        ]
+        if not data:
             return []
 
         # Filter per chat kalau ada
-        data = self._cache
         if chat_id:
             chat_msgs = [d for d in data if d.get("chat_id") == chat_id]
             if len(chat_msgs) >= 5:
@@ -149,7 +153,7 @@ class TrainingDataLoader:
         mine = [d for d in data if d.get("fromMe")]
         theirs = [d for d in data if not d.get("fromMe")]
 
-        # Ambil sample campuran
+        # Ambil sample campuran (terbaru dulu)
         result = []
         for m in mine[-limit // 2:]:
             result.append({"role": "assistant", "content": m["text"]})
@@ -210,6 +214,10 @@ class AutoReply:
         self._lock = asyncio.Lock()
         self._cooldown_until = 0.0
         self._dirty = False
+        # Real-time learning: corpus + buffer buat upload ke Upstash
+        self.corpus: list[dict] = []  # [{text, fromMe, chat_id, ts}]
+        self._pending_upload: list[dict] = []  # buffer belum di-upload
+        self._upload_task = None
 
     # ── state persistence ───────────────────────────────────────────────────
     async def init(self) -> None:
@@ -242,6 +250,81 @@ class AutoReply:
             self._dirty = False
         except Exception as e:
             logger.warning("gagal simpan ai-state: %s", e)
+
+    # ── real-time learning ─────────────────────────────────────────────────
+    def learn_one(self, text: str, from_me: bool, chat_id) -> None:
+        """Pelajari satu pesan masuk/keluar & buffer buat upload ke Upstash."""
+        text = (text or "").strip()
+        if len(text) < 2 or len(text) > 2000:
+            return
+        if text.startswith("/") or text.startswith("."):
+            return
+        entry = {
+            "text": text,
+            "fromMe": bool(from_me),
+            "chat_id": str(chat_id),
+            "ts": int(time.time()),
+        }
+        self.corpus.append(entry)
+        self._pending_upload.append(entry)
+        # Batasi corpus di memori
+        if len(self.corpus) > 2000:
+            self.corpus = self.corpus[-2000:]
+
+    def _start_upload_loop(self) -> None:
+        """Start background task buat upload pending messages ke Upstash."""
+        if self._upload_task is None:
+            self._upload_task = asyncio.create_task(self._upload_loop())
+
+    async def _upload_loop(self) -> None:
+        """Upload pending messages ke Upstash tiap 60 detik."""
+        while True:
+            await asyncio.sleep(60)
+            await self._flush_to_upstash()
+
+    async def _flush_to_upstash(self) -> None:
+        """Upload semua pending messages ke Upstash."""
+        if not self._pending_upload:
+            return
+        if not config.upstash_configured:
+            return
+        try:
+            from upstash import UpstashClient
+            upstash = UpstashClient(
+                url=config.upstash_url,
+                token=config.upstash_token,
+            )
+            # Ambil data lama
+            index_raw = await upstash.get(f"{config.training_key}:index")
+            old_keys = json.loads(index_raw) if index_raw else []
+            old_data = []
+            for key in old_keys:
+                chunk_raw = await upstash.get(key)
+                if chunk_raw:
+                    old_data.extend(json.loads(chunk_raw))
+
+            # Gabung dengan data baru
+            all_data = old_data + self._pending_upload
+            # Ambil 2000 terakhir
+            all_data = all_data[-2000:]
+
+            # Upload ulang
+            CHUNK_SIZE = 100
+            new_keys = []
+            for i in range(0, len(all_data), CHUNK_SIZE):
+                chunk = all_data[i:i + CHUNK_SIZE]
+                chunk_key = f"{config.training_key}:chunk:{i // CHUNK_SIZE}"
+                await upstash.set(chunk_key, json.dumps(chunk, ensure_ascii=False))
+                new_keys.append(chunk_key)
+
+            await upstash.set(f"{config.training_key}:index", json.dumps(new_keys))
+            await upstash.set(f"{config.training_key}:total", str(len(all_data)))
+
+            uploaded = len(self._pending_upload)
+            self._pending_upload.clear()
+            print(f"  [upload] {uploaded} pesan baru → Upstash (total: {len(all_data)})")
+        except Exception as e:
+            print(f"  [upload] gagal: {e}")
 
     def is_enabled(self) -> bool:
         return self.enabled

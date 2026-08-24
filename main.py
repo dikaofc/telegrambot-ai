@@ -195,6 +195,10 @@ async def on_incoming(event):
             logger.warning("command error: %s", e)
         return
 
+    # Belajar dari pesan masuk (real-time learning)
+    if text and not text.startswith("."):
+        ai.learn_one(text, False, chat_key(event))
+
     # grup: cuma balas kalau diizinkan & di-mention/di-reply
     replied_to_me = False
     if event.is_group:
@@ -227,18 +231,23 @@ async def on_incoming(event):
 
 @client.on(events.NewMessage(outgoing=True))
 async def on_outgoing(event):
-    # Outgoing messages — buat logging aja (training data dari Upstash)
-    pass
+    # Belajar dari pesan keluar (real-time learning)
+    if not event.message:
+        return
+    text = (event.message.text or "").strip()
+    if text and not text.startswith("."):
+        ai.learn_one(text, True, chat_key(event))
 
 
 # ── bootstrap ──────────────────────────────────────────────────────────────
 
 async def bootstrap_training_data():
-    """Load training data dari Upstash saat startup."""
+    """Load training data dari Upstash saat startup + start upload loop."""
     print("[1/4] memuat training data dari Upstash...")
     await ai.training.load(force=True)
+    ai._start_upload_loop()
     s = ai.stats()
-    print(f"[1/4] training data loaded: {s['total']} pesan")
+    print(f"[1/4] training data loaded: {s['total']} pesan + upload loop aktif")
 
 
 # ── main ───────────────────────────────────────────────────────────────────
