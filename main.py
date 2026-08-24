@@ -262,6 +262,7 @@ async def main():
         print("[ERROR] API_ID / API_HASH kosong! Isi di .env atau environment variables.")
         sys.exit(1)
 
+    global client
     print(f"[2/4] menyambungkan Telethon (api_id={config.api_id})...")
     # Retry connection — database locked bisa terjadi kalau proses lama masih jalan
     for attempt in range(3):
@@ -271,16 +272,13 @@ async def main():
         except Exception as e:
             if "database is locked" in str(e) and attempt < 2:
                 print(f"    database locked, coba lagi ({attempt + 1}/3)...")
-                # Kill proses python lain yang mungkin masih jalan
                 import subprocess
                 try:
                     subprocess.run(["pkill", "-f", "python.*main.py"], capture_output=True, timeout=5)
                 except Exception:
                     pass
                 await asyncio.sleep(3)
-                # Re-init client dengan session baru
                 from telethon import TelegramClient
-                global client
                 client = TelegramClient(config.session_name, config.api_id, config.api_hash)
             else:
                 raise
