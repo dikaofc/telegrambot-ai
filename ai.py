@@ -12,15 +12,19 @@ from config import config
 from logger import logger
 from tools import calculate, get_time
 
-STATE_PATH = Path("data/ai-state.json")
-
-SYSTEM_BASE = (
+STATE_PATH = Path("data/ai-state.json")SYSTEM_BASE = (
     "Kamu itu {name} ({username}). Kamu ORANG NYATA, bukan AI, bukan bot.\n"
     "Kamu lagi chat di Telegram.\n\n"
-    "Cara kamu ngobrol ada di contoh di bawah. TIRU persis gaya itu.\n"
-    "Kalau ditanya 'siapa kamu' → jawab sebagai {name}.\n"
-    "Kalau ditanya 'kamu AI ya' → bilang enggak/bukan.\n"
-    "JANGAN PERNAH sebut AI, OpenAI, Claude, LLM, atau apapun yang nunjukin kamu bot.\n")
+    "Tugas kamu: BALAS PESAN USER pakai GAYA PERSIS yang ada di contoh bawah.\n"
+    "JANGAN ubah gaya, JANGAN tambah formal, JANGAN jadi AI assistant.\n"
+    "Kalau contoh gaya kamu 'oke' maka balasnya ya 'oke', jangan 'Baik, saya siap membantu'.\n"
+    "Kalau contoh gaya kamu 'gas' maka balasnya ya 'gas', jangan 'Mari kita mulai'.\n\n"
+    "Aturan:\n"
+    "- Kalau ditanya 'siapa kamu' → jawab sebagai {name}.\n"
+    "- Kalau ditanya 'kamu AI ya' → bilang enggak/bukan.\n"
+    "- JANGAN PERNAH sebut AI, OpenAI, Claude, LLM, atau apapun yang nunjukin kamu bot.\n"
+    "- Jawab SINGKAT, kayak contoh gaya di bawah.\n"
+)
 
 
 def sanitize_reply(text: str) -> str:
@@ -125,7 +129,7 @@ class TrainingDataLoader:
         except Exception as e:
             logger.warning("gagal load training data dari Upstash: %s", e)
 
-    def get_style_examples(self, chat_id: str | None = None, limit: int = 20) -> list[dict]:
+    def get_style_examples(self, chat_id: str | None = None, limit: int = 30) -> list[dict]:
         """Ambil contoh gaya chat dari training data + corpus real-time."""
         # Gabung cache Upstash + corpus real-time
         data = self._cache + [
@@ -133,23 +137,23 @@ class TrainingDataLoader:
             for c in self.corpus
         ]
         if not data:
+            print("    [style] TIDAK ADA training data!")
             return []
 
-        # Filter per chat kalau ada
-        if chat_id:
-            chat_msgs = [d for d in data if d.get("chat_id") == chat_id]
-            if len(chat_msgs) >= 5:
-                data = chat_msgs
+        # JANGAN filter per chat — ambil SEMUA data biar gaya lu keliatan
+        # (kecuali data terlalu dikit)
 
         # Ambil yang dari "kamu" (fromMe=True) — ini gaya asli lu
         mine = [d for d in data if d.get("fromMe")]
         theirs = [d for d in data if not d.get("fromMe")]
 
-        # Prioritas: lebih banyak contoh gaya KAMU
+        print(f"    [style] total data: {len(data)}, dari kamu: {len(mine)}, lawan: {len(theirs)}")
+
+        # Ambil SEMUA contoh gaya kamu (terbaru dulu)
         result = []
         for m in mine[-limit:]:
             result.append({"role": "assistant", "content": m["text"]})
-        for m in theirs[-limit // 2:]:
+        for m in theirs[-limit:]:
             result.append({"role": "user", "content": m["text"]})
 
         return result
@@ -542,19 +546,21 @@ class AutoReply:
             theirs = [e for e in style_examples if e["role"] == "user"]
 
             if mine:
-                sys += "\n\n=== CARA KAMU NGOMONG (tiru persis) ==="
-                for i, ex in enumerate(mine):
+                sys += "\n\n=== KAMU BILANG GINI KALAU NGOBROL ==="
+                for i, ex in enumerate(mine[-30:]):
                     sys += f"\n{i+1}. {ex['content']}"
 
             if theirs:
-                sys += "\n\n=== CONTOH OBROLAN ==="
-                # Tampilkan alternating biar keliatan flow chat-nya
-                paired = list(zip(theirs[-10:], mine[-10:])) if len(theirs) >= len(mine) else list(zip(theirs, mine))
+                sys += "\n\n=== CONTOH CHAT ==="
+                # Ambil 10 obrolan terakhir biar keliatan flow-nya
+                recent_mine = mine[-10:] if len(mine) >= 10 else mine
+                recent_theirs = theirs[-10:] if len(theirs) >= 10 else theirs
+                paired = list(zip(recent_theirs, recent_mine))
                 for user_msg, my_msg in paired:
                     sys += f"\nUser: {user_msg['content']}"
                     sys += f"\nKamu: {my_msg['content']}"
 
-            sys += "\n\n=== BALAS PESAN DENGAN GAYA PERSIS DI ATAS ==="
+            sys += "\n\n=== SEKARANG BALAS PESAN USER DENGAN GAYA DI ATAS ==="
 
         # Tambah memori
         if self.memory:
