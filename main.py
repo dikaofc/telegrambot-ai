@@ -1,4 +1,4 @@
-"""Userbot Telegram AI otomatis (Telethon) — auto-reply, belajar gaya, memori, tools, voice."""
+"""Userbot Telegram AI (Telethon) — auto-reply, training data dari Upstash, local AI."""
 
 import asyncio
 import sys
@@ -6,9 +6,6 @@ import time
 
 from telethon import TelegramClient, events
 
-import stickers
-import stt
-import tts
 from ai import ai
 from config import config
 from logger import logger
@@ -18,26 +15,22 @@ COMMANDS = {
     "ping": "cek bot hidup",
     "me": "lihat ID akun kamu (buat set OWNER_ID)",
     "ai": ".ai on|off|status — on/off auto-reply",
-    "aitrain": "statistik korpus gaya",
-    "aistyle": "contoh gaya yang dipelajari",
-    "aiclear": "hapus semua korpus gaya",
+    "train": "statistik training data",
     "mem": ".mem [fakta] — lihat/simpan memori",
     "memclear": "hapus semua memori",
     "bl": ".bl [id] — blacklist (tanpa arg = list)",
     "unbl": ".unbl id — hapus dari blacklist",
     "aitest": ".aitest <teks> — tes balasan AI",
-    "sticker": ".sticker on|off|always — balas pakai sticker",
+    "reload": "reload training data dari Upstash",
 }
 
 client = TelegramClient(config.session_name, config.api_id, config.api_hash)
 ME = None
 _last_msg_ts: dict[str, float] = {}
-BURST_WINDOW = 4.0  # detik — pesan beruntun dalam jendela ini dianggap "tumpuk"
-_sticker_mode = config.ai_reply_sticker  # off | sticker | always
+BURST_WINDOW = 4.0
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
+# ── helpers ────────────────────────────────────────────────────────────────
 
 def is_owner(event) -> bool:
     if config.owner_id and event.sender_id == config.owner_id:
@@ -47,22 +40,9 @@ def is_owner(event) -> bool:
         uname = getattr(sender, "username", None)
         if uname and uname.lower() == config.owner_username.lower():
             return True
-    # belum dikonfigurasi → izinkan semua (dev), tapi sudah di-warning di log
     if not config.owner_id and not config.owner_username:
         return True
     return False
-
-
-def media_kind(msg):
-    if msg.voice or (msg.audio and getattr(msg.audio, "voice", False)):
-        return "voice"
-    if msg.sticker:
-        return "sticker"
-    if msg.photo:
-        return "photo"
-    if msg.video or msg.video_note:
-        return "video"
-    return None
 
 
 def chat_key(event) -> str:
@@ -70,7 +50,6 @@ def chat_key(event) -> str:
 
 
 def _is_stacked(chat_id: str, now: float) -> bool:
-    """True kalau pesan ini datang beruntun (burst) — buat mutusin quote/normal."""
     prev = _last_msg_ts.get(chat_id)
     _last_msg_ts[chat_id] = now
     return prev is not None and (now - prev) <= BURST_WINDOW
@@ -94,63 +73,7 @@ async def sender_name(event) -> str:
     return str(event.sender_id or "kamu")
 
 
-def should_voice(kind) -> bool:
-    if config.ai_reply_voice == "always":
-        return True
-    if config.ai_reply_voice == "voice" and kind == "voice":
-        return True
-    return False
-
-
-def _sticker_enabled() -> bool:
-    return _sticker_mode in ("sticker", "always")
-
-
-def _msg_sticker_emoji(msg) -> str | None:
-    st = getattr(msg, "sticker", None)
-    if st and getattr(st, "alt", None):
-        return st.alt
-    return None
-
-
-async def _send_sticker(event, emojis, stacked) -> bool:
-    doc = stickers.pick_sticker(emojis)
-    if not doc:
-        return False
-    try:
-        if stacked:
-            await event.reply(file=doc)
-        else:
-            await event.respond(file=doc)
-        return True
-    except Exception as e:
-        logger.warning("kirim sticker gagal: %s", e)
-        return False
-
-
-# ── voice ────────────────────────────────────────────────────────────────────
-
-
-async def handle_voice(event) -> str | None:
-    if not config.stt_api_key:
-        logger.info("voice note diterima tapi STT_API_KEY kosong → dilewati")
-        return None
-    try:
-        data = await client.download_media(event.message, file=bytes)
-    except Exception as e:
-        logger.warning("unduh voice gagal: %s", e)
-        return None
-    if not data:
-        logger.warning("unduh voice note kosong")
-        return None
-    text = await stt.transcribe(data)
-    if not text:
-        logger.warning("transkripsi voice note gagal/kosong (cek kuota Groq Whisper)")
-    return text or None
-
-
-# ── command ──────────────────────────────────────────────────────────────────
-
+# ── command handler ────────────────────────────────────────────────────────
 
 async def handle_command(event, text: str):
     parts = text.split(None, 1)
@@ -180,27 +103,23 @@ async def handle_command(event, text: str):
         if arg.lower() in ("off", "0", "false"):
             await ai.set_enabled(False)
             return await reply("Auto-reply AI: OFF")
+        s = ai.stats()
         return await reply(
             f"Auto-reply AI: {'ON' if ai.is_enabled() else 'OFF'}\n"
             f"Provider: {len(config.providers)}\n"
-            f"Terpasang: {'ya' if ai.is_configured() else 'tidak'}"
+            f"Training data: {s['total']} pesan ({s['from_me']} dari kamu, {s['from_others']} dari lawan)\n"
+            f"Memori: {len(ai.memory)} fakta"
         )
 
-    if cmd == "aitrain":
+    if cmd == "train":
         s = ai.stats()
         return await reply(
-            f"Korpus gaya: {s['total']} pesan ({s['mine']} milikku, {s['theirs']} lawan bicara)"
+            f"Training data:\n"
+            f"• Total: {s['total']} pesan\n"
+            f"• Dari kamu: {s['from_me']}\n"
+            f"• Dari lawan: {s['from_others']}\n"
+            f"• Nama: {s['name']}"
         )
-
-    if cmd == "aistyle":
-        samples = ai.style_samples(12)
-        if not samples:
-            return await reply("Belum ada korpus gaya.")
-        return await reply("Contoh gaya yang dipelajari:\n" + "\n".join(f"• {t}" for t in samples))
-
-    if cmd == "aiclear":
-        await ai.clear()
-        return await reply("Korpus gaya dihapus.")
 
     if cmd == "mem":
         if arg:
@@ -236,32 +155,21 @@ async def handle_command(event, text: str):
         r = await ai.test(arg)
         return await reply(r or "(tidak ada balasan — cek provider)")
 
-    if cmd == "sticker":
-        global _sticker_mode
-        if arg.lower() in ("on", "1", "true", "sticker"):
-            _sticker_mode = "sticker"
-            return await reply(f"Balas sticker: ON (sticker↔sticker). Sticker termuat: {stickers.count()}")
-        if arg.lower() == "always":
-            _sticker_mode = "always"
-            return await reply(f"Balas sticker: ALWAYS (tiap balasan + sticker). Sticker: {stickers.count()}")
-        if arg.lower() in ("off", "0", "false"):
-            _sticker_mode = "off"
-            return await reply("Balas sticker: OFF")
-        return await reply(
-            f"Balas sticker: {_sticker_mode}. Sticker termuat: {stickers.count()}\n"
-            f"Gunakan: .sticker on | off | always"
-        )
+    if cmd == "reload":
+        await ai.training.load(force=True)
+        s = ai.stats()
+        return await reply(f"Training data di-reload: {s['total']} pesan dari Upstash")
 
 
-# ── handlers ─────────────────────────────────────────────────────────────────
-
+# ── event handlers ─────────────────────────────────────────────────────────
 
 @client.on(events.NewMessage(incoming=True))
 async def on_incoming(event):
     global ME
     if not event.message or event.out:
         return
-    # jangan balas / pelajari pesan dari BOT (cegah loop kayak anonymous chat bot)
+
+    # skip bot messages (cegah loop)
     sender = event.sender
     if sender is None:
         try:
@@ -270,14 +178,13 @@ async def on_incoming(event):
             sender = None
     if sender is not None and getattr(sender, "bot", False):
         return
-    # abaikan channel/broadcast
+
+    # skip channel/broadcast
     if event.is_channel and not event.is_group:
         return
 
     msg = event.message
     text = (msg.text or "").strip()
-
-    # deteksi chat "tumpuk" (pesan beruntun) → nanti pakai quote kalau rame
     stacked = _is_stacked(chat_key(event), time.time())
 
     # command dari owner
@@ -287,10 +194,6 @@ async def on_incoming(event):
         except Exception as e:
             logger.warning("command error: %s", e)
         return
-
-    # belajar dari pesan masuk (teks biasa)
-    if text and not text.startswith("."):
-        ai.learn_one(text, False, chat_key(event))
 
     # grup: cuma balas kalau diizinkan & di-mention/di-reply
     replied_to_me = False
@@ -306,126 +209,60 @@ async def on_incoming(event):
         if not (mentioned or replied_to_me):
             return
 
-    kind = media_kind(msg)
-
-    # balas sticker pakai sticker dari koleksi userbot
-    if kind == "sticker" and _sticker_enabled():
-        emoji = _msg_sticker_emoji(msg)
-        if await _send_sticker(event, [emoji] if emoji else None, stacked):
-            return
-
-    voice_text = None
-    if kind == "voice":
-        voice_text = await handle_voice(event)
-        if voice_text:
-            ai.learn_one(voice_text, False, chat_key(event))
-
     name = await sender_name(event)
     reply = await ai.handle(
         chat_key(event),
         name,
         text=text or None,
-        media_kind=kind,
-        voice_text=voice_text,
         replied_to_me=replied_to_me,
     )
     if not reply:
         return
 
-    if should_voice(kind):
-        spoken = await ai._spoken_variant(reply)
-        audio = await tts.synthesize(spoken)
-        if audio:
-            try:
-                if stacked:
-                    await event.reply(file=audio, voice_note=True)
-                else:
-                    await event.respond(file=audio, voice_note=True)
-                return
-            except Exception as e:
-                logger.warning("kirim voice gagal: %s", e)
-    # normal: kirim biasa (bukan quote); kalau chat lagi rame/tumpuk, baru quote
     if stacked:
         await event.reply(reply)
     else:
         await event.respond(reply)
 
-    # mode always: sertakan sticker yang nyambung sama mood chat
-    if _sticker_mode == "always":
-        mode = ai.detect_mode(chat_key(event), text or voice_text or "")
-        emojis = stickers.MODE_EMOJIS.get(mode) or stickers.MODE_EMOJIS["normal"]
-        await _send_sticker(event, emojis, stacked)
-
 
 @client.on(events.NewMessage(outgoing=True))
 async def on_outgoing(event):
-    if not event.message:
-        return
-    text = (event.message.text or "").strip()
-    if text and not text.startswith("."):
-        ai.learn_one(text, True, chat_key(event))
+    # Outgoing messages — buat logging aja (training data dari Upstash)
+    pass
 
 
-# ── bootstrap riwayat ────────────────────────────────────────────────────────
+# ── bootstrap ──────────────────────────────────────────────────────────────
+
+async def bootstrap_training_data():
+    """Load training data dari Upstash saat startup."""
+    logger.info("memuat training data dari Upstash...")
+    await ai.training.load(force=True)
+    s = ai.stats()
+    logger.info("training data loaded: %d pesan (dari kamu: %d, lawan: %d)", s["total"], s["from_me"], s["from_others"])
 
 
-async def bootstrap_history():
-    """Baca N pesan terakhir tiap dialog buat seed gaya & konteks sebelum balas."""
-    if not config.ai_bootstrap:
-        return
-    logger.info(
-        "memuat riwayat chat (bootstrap) — sampai %d dialog × %d pesan ...",
-        config.ai_bootstrap_dialogs,
-        config.ai_bootstrap_messages,
-    )
-    done = 0
-    try:
-        async for dialog in client.iter_dialogs(limit=config.ai_bootstrap_dialogs):
-            if dialog.entity is not None and getattr(dialog.entity, "bot", False):
-                continue  # skip dialog bot (jangan pelajari pesan bot)
-            entity = dialog.entity or dialog.id
-            chat_id = str(dialog.id)
-            turns: list[dict] = []
-            try:
-                async for m in client.iter_messages(entity, limit=config.ai_bootstrap_messages):
-                    txt = (m.text or "").strip()
-                    if not txt:
-                        continue
-                    from_me = bool(m.out) or (ME is not None and m.sender_id == ME.id)
-                    ai.learn_one(txt, from_me, chat_id)
-                    turns.append({"role": "assistant" if from_me else "user", "content": txt})
-            except Exception as e:
-                logger.debug("gagal baca dialog %s: %s", chat_id, e)
-            turns.reverse()  # iter_messages newest-first → jadikan kronologis
-            ai.seed_context(chat_id, turns)
-            done += 1
-            if done % 5 == 0:
-                logger.info("bootstrap progres: %d dialog, korpus %d pesan", done, ai.stats()["total"])
-    except Exception as e:
-        logger.warning("bootstrap error: %s", e)
-    logger.info("bootstrap selesai: %d dialog terbaca, korpus %d pesan", done, ai.stats()["total"])
-
-
-# ── main ─────────────────────────────────────────────────────────────────────
-
+# ── main ───────────────────────────────────────────────────────────────────
 
 async def main():
     global ME
     await ai.init()
+
     if not config.api_id or not config.api_hash:
         logger.error("API_ID / API_HASH belum diisi di .env (dapatkan di my.telegram.org)")
         sys.exit(1)
+
     logger.info("menyambungkan Telethon (api_id=%s)...", config.api_id)
     await client.start(phone=config.phone)
     ME = await client.get_me()
     logger.info("login sebagai @%s (id=%s)", ME.username or "-", ME.id)
+
     if not config.owner_id and not config.owner_username:
         logger.warning(
             "OWNER_ID belum diset — command .* terbuka untuk semua. Set OWNER_ID=%s di .env",
             ME.id,
         )
-    await bootstrap_history()
-    await stickers.load_stickers(client)
+
+    await bootstrap_training_data()
     logger.info("userbot aktif. kirim .help untuk daftar command")
     await client.run_until_disconnected()
 

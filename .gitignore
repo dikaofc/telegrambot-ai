@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data/
+*.session
+*.session-journal
+colab_session
+colab_session.session
+colab_session.session-journal
