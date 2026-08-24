@@ -102,15 +102,26 @@ class TrainingDataLoader:
                 print("    [upstash] tidak ada training data")
                 return
 
-            chunk_keys = json.loads(index_raw)
-            print(f"    [upstash] loading {len(chunk_keys)} chunks...")
+            all_chunk_keys = json.loads(index_raw)
+            total_chunks = len(all_chunk_keys)
+
+            # CUMA load 5 chunk terakhir (500 pesan) — biar gak crash
+            LAST_N = 5
+            chunk_keys = all_chunk_keys[-LAST_N:]
+            print(f"    [upstash] {total_chunks} total chunks, loading {len(chunk_keys)} terakhir...")
+
+            # Load paralel pake asyncio.gather
+            async def load_chunk(key):
+                try:
+                    raw = await upstash.get(key)
+                    return json.loads(raw) if raw else []
+                except Exception:
+                    return []
+
+            results = await asyncio.gather(*[load_chunk(k) for k in chunk_keys])
             all_data = []
-            for i, key in enumerate(chunk_keys):
-                chunk_raw = await upstash.get(key)
-                if chunk_raw:
-                    all_data.extend(json.loads(chunk_raw))
-                if (i + 1) % 10 == 0:
-                    print(f"    [upstash] ...{i + 1}/{len(chunk_keys)} chunks")
+            for chunk in results:
+                all_data.extend(chunk)
 
             self._cache = all_data
 
@@ -121,11 +132,7 @@ class TrainingDataLoader:
 
             self._loaded = True
             self._last_load = time.time()
-            logger.info(
-                "training data loaded dari Upstash: %d pesan, nama=%s",
-                len(self._cache),
-                self._profile.get("name", "?"),
-            )
+            print(f"    [upstash] loaded {len(self._cache)} pesan dari {len(chunk_keys)} chunks")
         except Exception as e:
             logger.warning("gagal load training data dari Upstash: %s", e)
 
