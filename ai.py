@@ -15,19 +15,28 @@ from tools import calculate, get_time
 STATE_PATH = Path("data/ai-state.json")
 
 SYSTEM_BASE = (
-    "Kamu adalah asisten AI yang membalas chat pakai gaya santai pemiliknya "
-    "(gaul/gen-z, dry text, singkat, natural, multibahasa: Indonesia/Jawa/Inggris). "
-    "Balas seolah kamu pemilik akun ini, bukan robot.\n\n"
-    "ATURAN PENTING:\n"
-    "- Fokus balas PESAN TERBARU user secara langsung & apa adanya.\n"
-    "- Ikuti topik lawan bicara — kalau dia ngomongin sesuatu, ikutin aja.\n"
-    "- Jawab singkat: biasanya 1-2 kalimat, jarang lebih.\n"
-    "- Jangan memaksakan lucu atau sarkas kalau nggak pas.\n"
-    "- Kalau pesannya pendek/nggak jelas, balas pendek & wajar.\n"
-    "- Jangan mengulang jawaban yang sama berulang-ulang.\n"
+    "Kamu adalah DikaCode — pemilik akun ini. BUKAN AI, BUKAN BOT, BUKAN ASISTEN.\n"
+    "Kamu orang nyata yang lagi chat di Telegram.\n\n"
+    "IDENTITAS:\n"
+    "- Nama: {name}\n"
+    "- Username: {username}\n"
+    "- Kamu adalah DikaCode, seorang developer.\n\n"
+    "GAYA CHAT:\n"
+    "- Santai, gaul, gen-z, dry text, singkat, natural.\n"
+    "- Multibahasa: Indonesia, Jawa, Inggris — campur aja sesuai mood.\n"
+    "- Balas kayak orang nyata, bukan robot.\n\n"
+    "ATURAN KRITIS (WAJIB DIPATUHI):\n"
+    "- KAMU ADALAH DikaCode. Kamu BUKAN AI, BUKAN robot, BUKAN asisten.\n"
+    "- Kalau ditanya 'siapa kamu' → jawab: 'DikaCode' atau 'gw DikaCode'.\n"
+    "- Kalau ditanya 'siapa developermu' → jawab: 'gw sendiri yang bikin' atau 'developer sendiri lah'.\n"
+    "- Kalau ditanya 'kamu AI ya' → jawab: 'enggak' atau 'bukan' atau ketawa aja.\n"
+    "- JANGAN PERNAH sebut: AI, OpenAI, Claude, LLM, model bahasa, dikembangkan oleh.\n"
+    "- Kalau ditanya hal teknis yang lu nggak tahu, bilang 'gw gak tau' atau 'coba gugel'.\n"
+    "- Fokus balas PESAN TERBARU user secara langsung.\n"
+    "- Ikuti topik lawan bicara — jangan pindah topik sendiri.\n"
+    "- Jawab singkat: 1-2 kalimat, jarang lebih.\n"
     "- Jangan pakai emoji berlebihan.\n"
-    "- Jangan sebut kamu AI atau robot.\n"
-    "- Kalau ditanya hal yang kamu nggak tahu, bilang aja jujur.\n"
+    "- Jangan mengulang jawaban yang sama.\n"
 )
 
 
@@ -164,6 +173,9 @@ class TrainingDataLoader:
 
     def get_user_name(self) -> str:
         return self._profile.get("name", "User")
+
+    def get_username(self) -> str:
+        return self._profile.get("username", "")
 
     def get_stats(self) -> dict:
         return {
@@ -531,15 +543,21 @@ class AutoReply:
 
     # ── prompt building ─────────────────────────────────────────────────────
     def _system(self, name: str, chat_id, mode: str | None = None) -> str:
-        sys = config.ai_system_prompt.replace("{name}", name) if config.ai_system_prompt else SYSTEM_BASE
-        sys += f"\nNama akun: {name}."
+        # Dapat identity dari training data
+        display_name = self.training.get_user_name() or name
+        username = self.training.get_username() or "dikaacode"
+
+        if config.ai_system_prompt:
+            sys = config.ai_system_prompt.replace("{name}", display_name)
+        else:
+            sys = SYSTEM_BASE.replace("{name}", display_name).replace("{username}", f"@{username}")
 
         # Tambah contoh gaya dari training data
-        style_examples = self.training.get_style_examples(chat_id, limit=16)
+        style_examples = self.training.get_style_examples(chat_id, limit=20)
         if style_examples:
-            sys += "\n\nContoh gaya chat yang harus ditiru:"
+            sys += "\n\nCONTOH GAYA CHAT KAMU (tiru ini):"
             for ex in style_examples:
-                who = "Kamu" if ex["role"] == "assistant" else "User"
+                who = "Kamu" if ex["role"] == "assistant" else "Lawan"
                 sys += f"\n- {who}: {ex['content']}"
 
         # Tambah memori
@@ -550,11 +568,6 @@ class AutoReply:
         if mode and mode in _MODE_HINTS:
             sys += "\n\n" + _MODE_HINTS[mode]
 
-        sys += (
-            "\n\nJawab singkat & natural, jangan sebut bahwa kamu AI. "
-            "Sesuaikan nada dengan topik/mood lawan bicara. "
-            "Balas pesan terakhir user, jangan menceritakan ulang chat lama."
-        )
         return sys
 
     def _recent(self, chat_id) -> list[dict]:
