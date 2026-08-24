@@ -1,5 +1,4 @@
-"""Userbot Telegram AI (Telethon) — auto-reply, training data dari Upstash, local AI."""
-
+"""Userbot Telegram AI — auto-reply, training data dari Upstash."""
 import asyncio
 import sys
 import time
@@ -13,14 +12,14 @@ from logger import logger
 COMMANDS = {
     "help": "daftar command",
     "ping": "cek bot hidup",
-    "me": "lihat ID akun kamu (buat set OWNER_ID)",
-    "ai": ".ai on|off|status — on/off auto-reply",
+    "me": "lihat ID akun",
+    "ai": ".ai on|off|status",
     "train": "statistik training data",
-    "mem": ".mem [fakta] — lihat/simpan memori",
-    "memclear": "hapus semua memori",
-    "bl": ".bl [id] — blacklist (tanpa arg = list)",
-    "unbl": ".unbl id — hapus dari blacklist",
-    "aitest": ".aitest <teks> — tes balasan AI",
+    "mem": ".mem [fakta]",
+    "memclear": "hapus memori",
+    "bl": ".bl [id]",
+    "unbl": ".unbl id",
+    "aitest": ".aitest <teks>",
     "reload": "reload training data dari Upstash",
 }
 
@@ -29,8 +28,6 @@ ME = None
 _last_msg_ts: dict[str, float] = {}
 BURST_WINDOW = 4.0
 
-
-# ── helpers ────────────────────────────────────────────────────────────────
 
 def is_owner(event) -> bool:
     if config.owner_id and event.sender_id == config.owner_id:
@@ -73,7 +70,7 @@ async def sender_name(event) -> str:
     return str(event.sender_id or "kamu")
 
 
-# ── command handler ────────────────────────────────────────────────────────
+# ── commands ───────────────────────────────────────────────────────────────
 
 async def handle_command(event, text: str):
     parts = text.split(None, 1)
@@ -94,32 +91,26 @@ async def handle_command(event, text: str):
 
     if cmd in ("me", "id", "info"):
         me = await client.get_me()
-        return await reply(f"ID kamu: {me.id}\nUsername: @{me.username or '-'}")
+        return await reply(f"ID: {me.id}\nUsername: @{me.username or '-'}")
 
     if cmd == "ai":
         if arg.lower() in ("on", "1", "true"):
             await ai.set_enabled(True)
-            return await reply("Auto-reply AI: ON")
+            return await reply("Auto-reply: ON")
         if arg.lower() in ("off", "0", "false"):
             await ai.set_enabled(False)
-            return await reply("Auto-reply AI: OFF")
+            return await reply("Auto-reply: OFF")
         s = ai.stats()
         return await reply(
-            f"Auto-reply AI: {'ON' if ai.is_enabled() else 'OFF'}\n"
+            f"Auto-reply: {'ON' if ai.is_enabled() else 'OFF'}\n"
             f"Provider: {len(config.providers)}\n"
-            f"Training data: {s['total']} pesan ({s['from_me']} dari kamu, {s['from_others']} dari lawan)\n"
+            f"Training: {s['total']} pesan\n"
             f"Memori: {len(ai.memory)} fakta"
         )
 
     if cmd == "train":
         s = ai.stats()
-        return await reply(
-            f"Training data:\n"
-            f"• Total: {s['total']} pesan\n"
-            f"• Dari kamu: {s['from_me']}\n"
-            f"• Dari lawan: {s['from_others']}\n"
-            f"• Nama: {s['name']}"
-        )
+        return await reply(f"Training: {s['total']} pesan (kamu: {s['from_me']}, lawan: {s['from_others']})")
 
     if cmd == "mem":
         if arg:
@@ -141,24 +132,24 @@ async def handle_command(event, text: str):
                 return await reply("Blacklist kosong.")
             return await reply("Blacklist:\n" + "\n".join(f"• {x}" for x in bl))
         ident, added = await ai.add_to_blacklist(arg)
-        return await reply(f"{'Ditambah' if added else 'Sudah ada'} di blacklist: {ident}")
+        return await reply(f"{'Ditambah' if added else 'Sudah ada'}: {ident}")
 
     if cmd == "unbl":
         if not arg:
             return await reply("Usage: .unbl <id>")
         ident, removed = await ai.remove_from_blacklist(arg)
-        return await reply(f"{'Dihapus' if removed else 'Tidak ada'} dari blacklist: {ident}")
+        return await reply(f"{'Dihapus' if removed else 'Tidak ada'}: {ident}")
 
     if cmd == "aitest":
         if not arg:
             return await reply("Usage: .aitest <teks>")
         r = await ai.test(arg)
-        return await reply(r or "(tidak ada balasan — cek provider)")
+        return await reply(r or "(tidak ada balasan)")
 
     if cmd == "reload":
         await ai.training.load(force=True)
         s = ai.stats()
-        return await reply(f"Training data di-reload: {s['total']} pesan dari Upstash")
+        return await reply(f"Reloaded: {s['total']} pesan")
 
 
 # ── event handlers ─────────────────────────────────────────────────────────
@@ -169,7 +160,6 @@ async def on_incoming(event):
     if not event.message or event.out:
         return
 
-    # skip bot messages (cegah loop)
     sender = event.sender
     if sender is None:
         try:
@@ -178,8 +168,6 @@ async def on_incoming(event):
             sender = None
     if sender is not None and getattr(sender, "bot", False):
         return
-
-    # skip channel/broadcast
     if event.is_channel and not event.is_group:
         return
 
@@ -195,11 +183,11 @@ async def on_incoming(event):
             logger.warning("command error: %s", e)
         return
 
-    # Belajar dari pesan masuk (real-time learning)
+    # learn dari pesan masuk
     if text and not text.startswith("."):
         ai.learn_one(text, False, chat_key(event))
 
-    # grup: cuma balas kalau diizinkan & di-mention/di-reply
+    # grup: cuma balas kalau di-mention/di-reply
     replied_to_me = False
     if event.is_group:
         if not config.ai_reply_in_groups:
@@ -214,12 +202,7 @@ async def on_incoming(event):
             return
 
     name = await sender_name(event)
-    reply = await ai.handle(
-        chat_key(event),
-        name,
-        text=text or None,
-        replied_to_me=replied_to_me,
-    )
+    reply = await ai.handle(chat_key(event), name, text=text or None, replied_to_me=replied_to_me)
     if not reply:
         return
 
@@ -231,7 +214,6 @@ async def on_incoming(event):
 
 @client.on(events.NewMessage(outgoing=True))
 async def on_outgoing(event):
-    # Belajar dari pesan keluar (real-time learning)
     if not event.message:
         return
     text = (event.message.text or "").strip()
@@ -239,60 +221,51 @@ async def on_outgoing(event):
         ai.learn_one(text, True, chat_key(event))
 
 
-# ── bootstrap ──────────────────────────────────────────────────────────────
-
-async def bootstrap_training_data():
-    """Load training data dari Upstash saat startup + start upload loop."""
-    print("[1/4] memuat training data dari Upstash...")
-    await ai.training.load(force=True)
-    ai._start_upload_loop()
-    s = ai.stats()
-    print(f"[1/4] training data loaded: {s['total']} pesan + upload loop aktif")
-
-
 # ── main ───────────────────────────────────────────────────────────────────
 
 async def main():
-    global ME
+    global ME, client
+
     print("[0/4] inisialisasi AI...")
     await ai.init()
     print("[0/4] AI siap.")
 
     if not config.api_id or not config.api_hash:
-        print("[ERROR] API_ID / API_HASH kosong! Isi di .env atau environment variables.")
+        print("[ERROR] API_ID / API_HASH kosong!")
         sys.exit(1)
 
-    global client
-    print(f"[2/4] menyambungkan Telethon (api_id={config.api_id})...")
-    # Retry connection — database locked bisa terjadi kalau proses lama masih jalan
+    print(f"[2/4] menyambungkan Telethon...")
     for attempt in range(3):
         try:
             await client.start(phone=config.phone)
             break
         except Exception as e:
             if "database is locked" in str(e) and attempt < 2:
-                print(f"    database locked, coba lagi ({attempt + 1}/3)...")
+                print(f"    database locked, retry ({attempt + 1}/3)...")
                 import subprocess
                 try:
                     subprocess.run(["pkill", "-f", "python.*main.py"], capture_output=True, timeout=5)
                 except Exception:
                     pass
                 await asyncio.sleep(3)
-                from telethon import TelegramClient
                 client = TelegramClient(config.session_name, config.api_id, config.api_hash)
             else:
                 raise
+
     ME = await client.get_me()
     print(f"[3/4] login sebagai @{ME.username or '-'} (id={ME.id})")
 
     if not config.owner_id and not config.owner_username:
-        logger.warning(
-            "OWNER_ID belum diset — command .* terbuka untuk semua. Set OWNER_ID=%s di .env",
-            ME.id,
-        )
+        print(f"[WARN] OWNER_ID belum diset! Set OWNER_ID={ME.id} di .env")
 
-    await bootstrap_training_data()
-    print("[4/4] userbot aktif! kirim .help untuk daftar command.")
+    # load training data + start upload loop
+    print("[1/4] memuat training data dari Upstash...")
+    await ai.training.load(force=True)
+    ai._start_upload_loop()
+    s = ai.stats()
+    print(f"[1/4] training data: {s['total']} pesan")
+
+    print("[4/4] userbot aktif!")
     await client.run_until_disconnected()
 
 

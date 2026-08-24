@@ -1,4 +1,4 @@
-"""Inti AI auto-reply: training data dari Upstash, auto-fallback multi-model, tool calling."""
+"""Inti AI auto-reply: training data dari Upstash, auto-fallback multi-model."""
 import asyncio
 import json
 import re
@@ -30,19 +30,11 @@ SYSTEM_BASE = (
 
 
 def sanitize_reply(text: str) -> str:
-    """Bersihkan chain-of-thought / reasoning biar cuma jawaban final yang keluar."""
     if not text:
         return ""
-    # buang <thinking>...</thinking> blocks
     text = re.sub(r"<(thinking|reasoning|thought|analysis)>.*?</\1>", "", text, flags=re.S | re.I)
-    # buang special tokens reasoning
     text = re.sub(r"<\|(startofreasoning|endofreasoning)\|>.*?(?=<|$)", "", text, flags=re.S)
-    text = text.strip()
-    return text
-
-
-def _norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    return text.strip()
 
 
 def _words(s: str) -> set[str]:
@@ -57,62 +49,45 @@ def _similarity(a: str, b: str) -> float:
 
 
 class RateLimitError(Exception):
-    """Provider kena rate-limit (HTTP 429)."""
+    pass
 
 
-# ── training data loader dari Upstash ──────────────────────────────────────
+# ── Upstash loader ────────────────────────────────────────────────────────
 class TrainingDataLoader:
-    """Load training data dari Upstash Redis."""
-
     def __init__(self):
         self._cache: list[dict] = []
         self._profile: dict = {}
         self._loaded = False
         self._last_load = 0.0
-        self._reload_interval = 3600.0  # reload tiap jam
 
     async def _get_upstash(self):
-        """Create Upstash REST API client."""
         if not config.upstash_configured:
             return None
         try:
             from upstash import UpstashClient
-            return UpstashClient(
-                url=config.upstash_url,
-                token=config.upstash_token,
-            )
+            return UpstashClient(url=config.upstash_url, token=config.upstash_token)
         except Exception as e:
             logger.warning("gagal koneksi Upstash: %s", e)
             return None
 
     async def load(self, force: bool = False) -> None:
-        """Load training data dari Upstash ke cache lokal."""
-        if self._loaded and not force and (time.time() - self._last_load) < self._reload_interval:
+        if self._loaded and not force:
             return
 
-        print("    [upstash] connecting...")
         upstash = await self._get_upstash()
         if not upstash:
-            print("    [upstash] tidak terkonfigurasi — skip")
             return
 
         try:
-            # Baca index chunks
-            print("    [upstash] reading index...")
             index_raw = await upstash.get(f"{config.training_key}:index")
             if not index_raw:
-                print("    [upstash] tidak ada training data")
                 return
 
             all_chunk_keys = json.loads(index_raw)
-            total_chunks = len(all_chunk_keys)
+            # Cuma load 5 chunk terakhir (500 pesan)
+            chunk_keys = all_chunk_keys[-5:]
+            print(f"    [upstash] {len(all_chunk_keys)} chunks total, load {len(chunk_keys)} terakhir...")
 
-            # CUMA load 5 chunk terakhir (500 pesan) — biar gak crash
-            LAST_N = 5
-            chunk_keys = all_chunk_keys[-LAST_N:]
-            print(f"    [upstash] {total_chunks} total chunks, loading {len(chunk_keys)} terakhir...")
-
-            # Load paralel pake asyncio.gather
             async def load_chunk(key):
                 try:
                     raw = await upstash.get(key)
@@ -127,16 +102,15 @@ class TrainingDataLoader:
 
             self._cache = all_data
 
-            # Baca profile
             profile_raw = await upstash.get(config.profile_key)
             if profile_raw:
                 self._profile = json.loads(profile_raw)
 
             self._loaded = True
             self._last_load = time.time()
-            print(f"    [upstash] loaded {len(self._cache)} pesan dari {len(chunk_keys)} chunks")
+            print(f"    [upstash] loaded {len(self._cache)} pesan")
         except Exception as e:
-            logger.warning("gagal load training data dari Upstash: %s", e)
+            print(f"    [upstash] error: {e}")
 
     def get_user_name(self) -> str:
         return self._profile.get("name", "User")
@@ -153,16 +127,16 @@ class TrainingDataLoader:
         }
 
 
-# ── deteksi mode/topik percakapan ─────────────────────────────────────────
+# ── mode detection ────────────────────────────────────────────────────────
 _MODE_KEYWORDS: list[tuple[str, list[str]]] = [
-    ("mesra", ["sayang", "cinta", "beb", "baby", "love", "kangen", "rindu", "peluk", "cium", "pacar", "bby", "💕", "❤️", "😘", "😍"]),
+    ("mesra", ["sayang", "cinta", "beb", "baby", "love", "kangen", "rindu", "peluk", "cium", "pacar"]),
     ("kasar", ["anjing", "anjir", "njir", "goblok", "tolol", "bangsat", "fuck", "shit", "bego", "bacot", "asu", "jancok"]),
-    ("sopan", ["selamat pagi", "selamat siang", "selamat malam", "permisi", "mohon", "terima kasih", "assalamualaikum", "dengan hormat", "pak", "bu", "kak"]),
+    ("sopan", ["selamat pagi", "selamat siang", "selamat malam", "permisi", "mohon", "terima kasih", "assalamualaikum"]),
 ]
 
 _MODE_HINTS = {
-    "mesra": "Nada: mesra/romantis — lembut, perhatian, balas kayak orang deket.",
-    "kasar": "Nada: gaul, boleh nyeletuk kasar biar nyambung sama lawan bicara.",
+    "mesra": "Nada: mesra/romantis.",
+    "kasar": "Nada: gaul, boleh nyeletuk kasar.",
     "sopan": "Nada: sopan & formal.",
 }
 
@@ -193,40 +167,34 @@ class AutoReply:
         self._lock = asyncio.Lock()
         self._cooldown_until = 0.0
         self._dirty = False
-        # Real-time learning: corpus + buffer buat upload ke Upstash
-        self.corpus: list[dict] = []  # [{text, fromMe, chat_id, ts}]        self._pending_upload: list[dict] = []  # buffer belum di-upload
+        self.corpus: list[dict] = []
+        self._pending_upload: list[dict] = []
         self._upload_task = None
 
+    # ── style examples ─────────────────────────────────────────────────────
     def get_style_examples(self, chat_id: str | None = None, limit: int = 30) -> list[dict]:
-        """Ambil contoh gaya chat dari training data + corpus real-time."""
-        # Gabung cache Upstash + corpus real-time
         data = self.training._cache + [
             {"text": c["text"], "fromMe": c["fromMe"], "chat_id": c["chat_id"]}
             for c in self.corpus
         ]
         if not data:
-            print("    [style] TIDAK ADA training data!")
             return []
 
-        # Ambil yang dari "kamu" (fromMe=True) — ini gaya asli lu
         mine = [d for d in data if d.get("fromMe")]
         theirs = [d for d in data if not d.get("fromMe")]
 
-        print(f"    [style] total data: {len(data)}, dari kamu: {len(mine)}, lawan: {len(theirs)}")
+        print(f"    [style] total={len(data)} mine={len(mine)} theirs={len(theirs)}")
 
-        # Ambil SEMUA contoh gaya kamu (terbaru dulu)
         result = []
         for m in mine[-limit:]:
             result.append({"role": "assistant", "content": m["text"]})
         for m in theirs[-limit:]:
             result.append({"role": "user", "content": m["text"]})
-
         return result
 
-    # ── state persistence ───────────────────────────────────────────────────
+    # ── init ────────────────────────────────────────────────────────────────
     async def init(self) -> None:
         print("  [ai] load state lokal...")
-        # Load state lokal
         try:
             if STATE_PATH.exists():
                 d = json.loads(STATE_PATH.read_text(encoding="utf-8"))
@@ -237,10 +205,10 @@ class AutoReply:
             print(f"  [ai] warning: {e}")
 
         print("  [ai] load training data dari Upstash...")
-        # Load training data dari Upstash
         await self.training.load(force=True)
 
-        print(f"  [ai] done: enabled={self.enabled}, memory={len(self.memory)}, training={self.training.get_stats()['total']} pesan")
+        s = self.training.get_stats()
+        print(f"  [ai] done: enabled={self.enabled}, memory={len(self.memory)}, training={s['total']} pesan")
 
     async def _save(self) -> None:
         try:
@@ -255,9 +223,8 @@ class AutoReply:
         except Exception as e:
             logger.warning("gagal simpan ai-state: %s", e)
 
-    # ── real-time learning ─────────────────────────────────────────────────
+    # ── real-time learning ──────────────────────────────────────────────────
     def learn_one(self, text: str, from_me: bool, chat_id) -> None:
-        """Pelajari satu pesan masuk/keluar & buffer buat upload ke Upstash."""
         text = (text or "").strip()
         if len(text) < 2 or len(text) > 2000:
             return
@@ -271,34 +238,27 @@ class AutoReply:
         }
         self.corpus.append(entry)
         self._pending_upload.append(entry)
-        # Batasi corpus di memori
         if len(self.corpus) > 2000:
             self.corpus = self.corpus[-2000:]
 
     def _start_upload_loop(self) -> None:
-        """Start background task buat upload pending messages ke Upstash."""
         if self._upload_task is None:
             self._upload_task = asyncio.create_task(self._upload_loop())
 
     async def _upload_loop(self) -> None:
-        """Upload pending messages ke Upstash tiap 60 detik."""
         while True:
             await asyncio.sleep(60)
             await self._flush_to_upstash()
 
     async def _flush_to_upstash(self) -> None:
-        """Upload semua pending messages ke Upstash."""
         if not self._pending_upload:
             return
         if not config.upstash_configured:
             return
         try:
             from upstash import UpstashClient
-            upstash = UpstashClient(
-                url=config.upstash_url,
-                token=config.upstash_token,
-            )
-            # Ambil data lama
+            upstash = UpstashClient(url=config.upstash_url, token=config.upstash_token)
+
             index_raw = await upstash.get(f"{config.training_key}:index")
             old_keys = json.loads(index_raw) if index_raw else []
             old_data = []
@@ -307,12 +267,9 @@ class AutoReply:
                 if chunk_raw:
                     old_data.extend(json.loads(chunk_raw))
 
-            # Gabung dengan data baru
             all_data = old_data + self._pending_upload
-            # Ambil 2000 terakhir
             all_data = all_data[-2000:]
 
-            # Upload ulang
             CHUNK_SIZE = 100
             new_keys = []
             for i in range(0, len(all_data), CHUNK_SIZE):
@@ -326,10 +283,11 @@ class AutoReply:
 
             uploaded = len(self._pending_upload)
             self._pending_upload.clear()
-            print(f"  [upload] {uploaded} pesan baru → Upstash (total: {len(all_data)})")
+            print(f"  [upload] {uploaded} pesan → Upstash (total: {len(all_data)})")
         except Exception as e:
             print(f"  [upload] gagal: {e}")
 
+    # ── config helpers ──────────────────────────────────────────────────────
     def is_enabled(self) -> bool:
         return self.enabled
 
@@ -363,7 +321,7 @@ class AutoReply:
     def list_blacklist(self) -> list[str]:
         return sorted(self.blacklist)
 
-    # ── memori ──────────────────────────────────────────────────────────────
+    # ── memory ──────────────────────────────────────────────────────────────
     def list_memory(self) -> list[str]:
         return list(self.memory)
 
@@ -391,55 +349,15 @@ class AutoReply:
             hits = self.memory[-20:]
         return "\n".join(f"- {m}" for m in hits)
 
-    # ── tool schemas & executor ─────────────────────────────────────────────
+    # ── tools ───────────────────────────────────────────────────────────────
     def _tool_schemas(self) -> list[dict]:
         if not config.ai_tools:
             return []
         return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_time",
-                    "description": "Waktu/tanggal sekarang (WIB)",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "calculate",
-                    "description": "Hitung ekspresi matematika",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"expression": {"type": "string"}},
-                        "required": ["expression"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "remember_fact",
-                    "description": "Simpan fakta penting yang diceritakan user (nama, kesukaan, janji)",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"fact": {"type": "string"}},
-                        "required": ["fact"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "recall_facts",
-                    "description": "Ingat fakta tersimpan yang relevan dengan pertanyaan",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"],
-                    },
-                },
-            },
+            {"type": "function", "function": {"name": "get_time", "description": "Waktu sekarang (WIB)", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "calculate", "description": "Hitung ekspresi matematika", "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}, "required": ["expression"]}}},
+            {"type": "function", "function": {"name": "remember_fact", "description": "Simpan fakta penting", "parameters": {"type": "object", "properties": {"fact": {"type": "string"}}, "required": ["fact"]}}},
+            {"type": "function", "function": {"name": "recall_facts", "description": "Ingat fakta tersimpan", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
         ]
 
     async def _run_tool(self, name: str, args: dict) -> str:
@@ -456,7 +374,7 @@ class AutoReply:
         except Exception as e:
             return f"tool error: {e}"
 
-    # ── LLM calls (auto-fallback chain) ────────────────────────────────────
+    # ── LLM calls ───────────────────────────────────────────────────────────
     def _headers(self, provider: dict) -> dict:
         h = {"Content-Type": "application/json"}
         if provider.get("api_key"):
@@ -464,7 +382,6 @@ class AutoReply:
         return h
 
     async def _call(self, provider: dict, messages: list[dict], tools: list[dict]) -> str | None:
-        """Satu provider, termasuk loop tool-calling."""
         body = {"model": provider["model"], "messages": messages, "temperature": 0.7}
         if tools:
             body["tools"] = tools
@@ -487,7 +404,6 @@ class AutoReply:
             if not tool_calls:
                 return content or None
 
-            # jalankan tools lalu lanjutkan
             messages.append(msg)
             for tc in tool_calls:
                 fn = tc.get("function") or {}
@@ -496,17 +412,12 @@ class AutoReply:
                 except Exception:
                     args = {}
                 result = await self._run_tool(fn.get("name", ""), args)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": result,
-                })
+                messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "content": result})
             body = {"model": provider["model"], "messages": messages, "temperature": 0.7}
 
         return None
 
     async def _complete(self, messages: list[dict], tools: list[dict]) -> str | None:
-        """Coba provider berurutan (primary → fallback)."""
         last_err = "tidak ada provider"
         rate_limited = False
 
@@ -518,24 +429,21 @@ class AutoReply:
             except RateLimitError:
                 rate_limited = True
                 last_err = f"{provider['name']} rate-limited"
-                logger.debug("provider %s rate-limited", provider["name"])
                 await asyncio.sleep(1.5)
                 continue
             except Exception as e:
                 last_err = str(e)
-                logger.warning("provider %s gagal: %s", provider["name"], e)
+                logger.warning("provider %s: %s", provider["name"], e)
                 continue
 
         if rate_limited:
             self._cooldown_until = time.time() + config.ai_cooldown_seconds
-            logger.warning("semua provider rate-limited → dijeda %ss", config.ai_cooldown_seconds)
         else:
             logger.error("semua provider gagal: %s", last_err)
         return None
 
-    # ── prompt building ─────────────────────────────────────────────────────
+    # ── system prompt ───────────────────────────────────────────────────────
     def _system(self, name: str, chat_id, mode: str | None = None) -> str:
-        # Dapat identity dari training data
         display_name = self.training.get_user_name() or name
         username = self.training.get_username() or "dikaacode"
 
@@ -544,7 +452,7 @@ class AutoReply:
         else:
             sys = SYSTEM_BASE.replace("{name}", display_name).replace("{username}", f"@{username}")
 
-        # ── GAYA CHAT DARI DATA SCRAPE — ini yang paling penting ──
+        # Style dari data scrape
         style_examples = self.get_style_examples(chat_id, limit=40)
         if style_examples:
             mine = [e for e in style_examples if e["role"] == "assistant"]
@@ -557,7 +465,6 @@ class AutoReply:
 
             if theirs:
                 sys += "\n\n=== CONTOH CHAT ==="
-                # Ambil 10 obrolan terakhir biar keliatan flow-nya
                 recent_mine = mine[-10:] if len(mine) >= 10 else mine
                 recent_theirs = theirs[-10:] if len(theirs) >= 10 else theirs
                 paired = list(zip(recent_theirs, recent_mine))
@@ -567,11 +474,9 @@ class AutoReply:
 
             sys += "\n\n=== SEKARANG BALAS PESAN USER DENGAN GAYA DI ATAS ==="
 
-        # Tambah memori
         if self.memory:
             sys += "\n\nFakta yang kamu ingat:\n" + "\n".join(f"- {m}" for m in self.memory[-15:])
 
-        # Mode hint
         if mode and mode in _MODE_HINTS:
             sys += "\n\n" + _MODE_HINTS[mode]
 
@@ -586,7 +491,6 @@ class AutoReply:
         q.append({"role": role, "content": content})
 
     def detect_mode(self, chat_id, content: str) -> str | None:
-        """Public: deteksi mode chat."""
         texts = [content]
         for m in self._recent(chat_id):
             if m.get("role") == "user":
@@ -597,7 +501,7 @@ class AutoReply:
                 return mode
         return None
 
-    # ── pipeline utama ─────────────────────────────────────────────────────
+    # ── handle message ──────────────────────────────────────────────────────
     async def handle(
         self,
         chat_id,
@@ -606,7 +510,6 @@ class AutoReply:
         media_kind: str | None = None,
         replied_to_me: bool = False,
     ) -> str | None:
-        """Balas otomatis. Return teks balasan atau None (skip)."""
         if not self.enabled:
             return None
         if time.time() < self._cooldown_until:
@@ -633,7 +536,6 @@ class AutoReply:
             if not reply:
                 return None
 
-            # skip command-like replies
             if reply.lstrip().startswith("/"):
                 return None
 
@@ -642,7 +544,7 @@ class AutoReply:
             if any(_similarity(r, reply) >= 0.6 for r in prev_replies[-3:]):
                 retry = messages + [
                     {"role": "assistant", "content": reply},
-                    {"role": "user", "content": "Jawabanmu barusan mirip banget sama yang sebelumnya. Jawab beda & natural."},
+                    {"role": "user", "content": "Jawabanmu mirip sama sebelumnya. Jawab beda."},
                 ]
                 alt = await self._complete(retry, [])
                 if alt and not any(_similarity(r, alt) >= 0.6 for r in prev_replies[-3:]):
