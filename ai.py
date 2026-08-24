@@ -15,29 +15,12 @@ from tools import calculate, get_time
 STATE_PATH = Path("data/ai-state.json")
 
 SYSTEM_BASE = (
-    "Kamu adalah DikaCode — pemilik akun ini. BUKAN AI, BUKAN BOT, BUKAN ASISTEN.\n"
-    "Kamu orang nyata yang lagi chat di Telegram.\n\n"
-    "IDENTITAS:\n"
-    "- Nama: {name}\n"
-    "- Username: {username}\n"
-    "- Kamu adalah DikaCode, seorang developer.\n\n"
-    "GAYA CHAT:\n"
-    "- Santai, gaul, gen-z, dry text, singkat, natural.\n"
-    "- Multibahasa: Indonesia, Jawa, Inggris — campur aja sesuai mood.\n"
-    "- Balas kayak orang nyata, bukan robot.\n\n"
-    "ATURAN KRITIS (WAJIB DIPATUHI):\n"
-    "- KAMU ADALAH DikaCode. Kamu BUKAN AI, BUKAN robot, BUKAN asisten.\n"
-    "- Kalau ditanya 'siapa kamu' → jawab: 'DikaCode' atau 'gw DikaCode'.\n"
-    "- Kalau ditanya 'siapa developermu' → jawab: 'gw sendiri yang bikin' atau 'developer sendiri lah'.\n"
-    "- Kalau ditanya 'kamu AI ya' → jawab: 'enggak' atau 'bukan' atau ketawa aja.\n"
-    "- JANGAN PERNAH sebut: AI, OpenAI, Claude, LLM, model bahasa, dikembangkan oleh.\n"
-    "- Kalau ditanya hal teknis yang lu nggak tahu, bilang 'gw gak tau' atau 'coba gugel'.\n"
-    "- Fokus balas PESAN TERBARU user secara langsung.\n"
-    "- Ikuti topik lawan bicara — jangan pindah topik sendiri.\n"
-    "- Jawab singkat: 1-2 kalimat, jarang lebih.\n"
-    "- Jangan pakai emoji berlebihan.\n"
-    "- Jangan mengulang jawaban yang sama.\n"
-)
+    "Kamu itu {name} ({username}). Kamu ORANG NYATA, bukan AI, bukan bot.\n"
+    "Kamu lagi chat di Telegram.\n\n"
+    "Cara kamu ngobrol ada di contoh di bawah. TIRU persis gaya itu.\n"
+    "Kalau ditanya 'siapa kamu' → jawab sebagai {name}.\n"
+    "Kalau ditanya 'kamu AI ya' → bilang enggak/bukan.\n"
+    "JANGAN PERNAH sebut AI, OpenAI, Claude, LLM, atau apapun yang nunjukin kamu bot.\n")
 
 
 def sanitize_reply(text: str) -> str:
@@ -158,13 +141,13 @@ class TrainingDataLoader:
             if len(chat_msgs) >= 5:
                 data = chat_msgs
 
-        # Ambil yang dari "kamu" (fromMe=True) buat gaya
+        # Ambil yang dari "kamu" (fromMe=True) — ini gaya asli lu
         mine = [d for d in data if d.get("fromMe")]
         theirs = [d for d in data if not d.get("fromMe")]
 
-        # Ambil sample campuran (terbaru dulu)
+        # Prioritas: lebih banyak contoh gaya KAMU
         result = []
-        for m in mine[-limit // 2:]:
+        for m in mine[-limit:]:
             result.append({"role": "assistant", "content": m["text"]})
         for m in theirs[-limit // 2:]:
             result.append({"role": "user", "content": m["text"]})
@@ -552,17 +535,30 @@ class AutoReply:
         else:
             sys = SYSTEM_BASE.replace("{name}", display_name).replace("{username}", f"@{username}")
 
-        # Tambah contoh gaya dari training data
-        style_examples = self.training.get_style_examples(chat_id, limit=20)
+        # ── GAYA CHAT DARI DATA SCRAPE — ini yang paling penting ──
+        style_examples = self.training.get_style_examples(chat_id, limit=40)
         if style_examples:
-            sys += "\n\nCONTOH GAYA CHAT KAMU (tiru ini):"
-            for ex in style_examples:
-                who = "Kamu" if ex["role"] == "assistant" else "Lawan"
-                sys += f"\n- {who}: {ex['content']}"
+            mine = [e for e in style_examples if e["role"] == "assistant"]
+            theirs = [e for e in style_examples if e["role"] == "user"]
+
+            if mine:
+                sys += "\n\n=== CARA KAMU NGOMONG (tiru persis) ==="
+                for i, ex in enumerate(mine):
+                    sys += f"\n{i+1}. {ex['content']}"
+
+            if theirs:
+                sys += "\n\n=== CONTOH OBROLAN ==="
+                # Tampilkan alternating biar keliatan flow chat-nya
+                paired = list(zip(theirs[-10:], mine[-10:])) if len(theirs) >= len(mine) else list(zip(theirs, mine))
+                for user_msg, my_msg in paired:
+                    sys += f"\nUser: {user_msg['content']}"
+                    sys += f"\nKamu: {my_msg['content']}"
+
+            sys += "\n\n=== BALAS PESAN DENGAN GAYA PERSIS DI ATAS ==="
 
         # Tambah memori
         if self.memory:
-            sys += "\n\nFakta yang kamu ingat soal user:\n" + "\n".join(f"- {m}" for m in self.memory[-20:])
+            sys += "\n\nFakta yang kamu ingat:\n" + "\n".join(f"- {m}" for m in self.memory[-15:])
 
         # Mode hint
         if mode and mode in _MODE_HINTS:
