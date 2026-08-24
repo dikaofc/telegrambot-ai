@@ -92,24 +92,29 @@ class TrainingDataLoader:
         if self._loaded and not force and (time.time() - self._last_load) < self._reload_interval:
             return
 
+        print("    [upstash] connecting...")
         upstash = await self._get_upstash()
         if not upstash:
-            logger.info("Upstash tidak terkonfigurasi — training data kosong")
+            print("    [upstash] tidak terkonfigurasi — skip")
             return
 
         try:
             # Baca index chunks
+            print("    [upstash] reading index...")
             index_raw = await upstash.get(f"{config.training_key}:index")
             if not index_raw:
-                logger.info("tidak ada training data di Upstash")
+                print("    [upstash] tidak ada training data")
                 return
 
             chunk_keys = json.loads(index_raw)
+            print(f"    [upstash] loading {len(chunk_keys)} chunks...")
             all_data = []
-            for key in chunk_keys:
+            for i, key in enumerate(chunk_keys):
                 chunk_raw = await upstash.get(key)
                 if chunk_raw:
                     all_data.extend(json.loads(chunk_raw))
+                if (i + 1) % 10 == 0:
+                    print(f"    [upstash] ...{i + 1}/{len(chunk_keys)} chunks")
 
             self._cache = all_data
 
@@ -208,6 +213,7 @@ class AutoReply:
 
     # ── state persistence ───────────────────────────────────────────────────
     async def init(self) -> None:
+        print("  [ai] load state lokal...")
         # Load state lokal
         try:
             if STATE_PATH.exists():
@@ -216,15 +222,13 @@ class AutoReply:
                 self.blacklist = {str(x) for x in (d.get("blacklist") or [])}
                 self.memory = [str(x) for x in (d.get("memory") or [])]
         except Exception as e:
-            logger.warning("gagal muat ai-state: %s", e)
+            print(f"  [ai] warning: {e}")
 
+        print("  [ai] load training data dari Upstash...")
         # Load training data dari Upstash
         await self.training.load(force=True)
 
-        logger.info(
-            "AI dimuat: enabled=%s, memory=%s, training=%s pesan",
-            self.enabled, len(self.memory), self.training.get_stats()["total"],
-        )
+        print(f"  [ai] done: enabled={self.enabled}, memory={len(self.memory)}, training={self.training.get_stats()['total']} pesan")
 
     async def _save(self) -> None:
         try:

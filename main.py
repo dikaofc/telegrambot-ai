@@ -235,26 +235,28 @@ async def on_outgoing(event):
 
 async def bootstrap_training_data():
     """Load training data dari Upstash saat startup."""
-    logger.info("memuat training data dari Upstash...")
+    print("[1/4] memuat training data dari Upstash...")
     await ai.training.load(force=True)
     s = ai.stats()
-    logger.info("training data loaded: %d pesan (dari kamu: %d, lawan: %d)", s["total"], s["from_me"], s["from_others"])
+    print(f"[1/4] training data loaded: {s['total']} pesan")
 
 
 # ── main ───────────────────────────────────────────────────────────────────
 
 async def main():
     global ME
+    print("[0/4] inisialisasi AI...")
     await ai.init()
+    print("[0/4] AI siap.")
 
     if not config.api_id or not config.api_hash:
-        logger.error("API_ID / API_HASH belum diisi di .env (dapatkan di my.telegram.org)")
+        print("[ERROR] API_ID / API_HASH kosong! Isi di .env atau environment variables.")
         sys.exit(1)
 
-    logger.info("menyambungkan Telethon (api_id=%s)...", config.api_id)
+    print(f"[2/4] menyambungkan Telethon (api_id={config.api_id})...")
     await client.start(phone=config.phone)
     ME = await client.get_me()
-    logger.info("login sebagai @%s (id=%s)", ME.username or "-", ME.id)
+    print(f"[3/4] login sebagai @{ME.username or '-'} (id={ME.id})")
 
     if not config.owner_id and not config.owner_username:
         logger.warning(
@@ -263,7 +265,7 @@ async def main():
         )
 
     await bootstrap_training_data()
-    logger.info("userbot aktif. kirim .help untuk daftar command")
+    print("[4/4] userbot aktif! kirim .help untuk daftar command.")
     await client.run_until_disconnected()
 
 
@@ -271,5 +273,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("berhenti.")
+        print("berhenti.")
         sys.exit(0)
