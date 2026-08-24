@@ -1,11 +1,21 @@
 import json
-from upstash_redis import Redis
+import httpx
 
-# Upstash pake REST API, bukan redis:// protocol
-r = Redis(
-    url=UPSTASH_REDIS_URL,
-    token=UPSTASH_REDIS_TOKEN,
-)
+# Upstash REST API — pakai httpx langsung, gak perlu package tambahan
+UPSTASH_HEADERS = {
+    "Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}",
+    "Content-Type": "application/json",
+}
+
+def upstash_set(key, value):
+    """SET a key di Upstash."""
+    r = httpx.post(
+        f"{UPSTASH_REDIS_URL}/set/{key}",
+        headers=UPSTASH_HEADERS,
+        content=value,
+        timeout=30,
+    )
+    return r.status_code == 200
 
 # Upload training data (chunked biar nggak timeout)
 CHUNK_SIZE = 100
@@ -14,16 +24,18 @@ all_keys = []
 for i in range(0, len(training_data), CHUNK_SIZE):
     chunk = training_data[i:i + CHUNK_SIZE]
     chunk_key = f"{TRAINING_KEY}:chunk:{i // CHUNK_SIZE}"
-    r.set(chunk_key, json.dumps(chunk, ensure_ascii=False))
+    upstash_set(chunk_key, json.dumps(chunk, ensure_ascii=False))
     all_keys.append(chunk_key)
+    if (i // CHUNK_SIZE) % 10 == 0:
+        print(f"  ... uploaded chunk {i // CHUNK_SIZE + 1}/{(len(training_data) + CHUNK_SIZE - 1) // CHUNK_SIZE}")
 
 # Simpan index chunk
-r.set(f"{TRAINING_KEY}:index", json.dumps(all_keys))
-r.set(f"{TRAINING_KEY}:total", str(len(training_data)))
+upstash_set(f"{TRAINING_KEY}:index", json.dumps(all_keys))
+upstash_set(f"{TRAINING_KEY}:total", str(len(training_data)))
 
 # Upload chat profile (buat system prompt)
 my_name = me.first_name or "User"
-r.set(PROFILE_KEY, json.dumps({
+upstash_set(PROFILE_KEY, json.dumps({
     "name": my_name,
     "username": me.username or "",
     "user_id": me.id,
@@ -33,7 +45,7 @@ r.set(PROFILE_KEY, json.dumps({
 }, ensure_ascii=False))
 
 # Upload stats
-r.set(STATS_KEY, json.dumps({
+upstash_set(STATS_KEY, json.dumps({
     "total_messages": len(training_data),
     "total_chats": len(chat_stats),
     "scraped_at": datetime.now(WIB).isoformat(),

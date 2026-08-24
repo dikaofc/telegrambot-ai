@@ -73,19 +73,16 @@ class TrainingDataLoader:
         self._last_load = 0.0
         self._reload_interval = 3600.0  # reload tiap jam
 
-    async def _get_redis(self):
-        """Create redis connection to Upstash via REST API."""
+    async def _get_upstash(self):
+        """Create Upstash REST API client."""
         if not config.upstash_configured:
             return None
         try:
-            from upstash_redis import Redis
-            return Redis(
+            from upstash import UpstashClient
+            return UpstashClient(
                 url=config.upstash_url,
                 token=config.upstash_token,
             )
-        except ImportError:
-            logger.warning("upstash-redis tidak terpasang — pip install upstash-redis")
-            return None
         except Exception as e:
             logger.warning("gagal koneksi Upstash: %s", e)
             return None
@@ -95,14 +92,14 @@ class TrainingDataLoader:
         if self._loaded and not force and (time.time() - self._last_load) < self._reload_interval:
             return
 
-        r = await self._get_redis()
-        if not r:
+        upstash = await self._get_upstash()
+        if not upstash:
             logger.info("Upstash tidak terkonfigurasi — training data kosong")
             return
 
         try:
             # Baca index chunks
-            index_raw = r.get(f"{config.training_key}:index")
+            index_raw = await upstash.get(f"{config.training_key}:index")
             if not index_raw:
                 logger.info("tidak ada training data di Upstash")
                 return
@@ -110,14 +107,14 @@ class TrainingDataLoader:
             chunk_keys = json.loads(index_raw)
             all_data = []
             for key in chunk_keys:
-                chunk_raw = r.get(key)
+                chunk_raw = await upstash.get(key)
                 if chunk_raw:
                     all_data.extend(json.loads(chunk_raw))
 
             self._cache = all_data
 
             # Baca profile
-            profile_raw = r.get(config.profile_key)
+            profile_raw = await upstash.get(config.profile_key)
             if profile_raw:
                 self._profile = json.loads(profile_raw)
 

@@ -151,13 +151,22 @@ print(f"   Chat kosong: {skipped_empty}")
 # ============================================================
 # CELL 5: UPLOAD KE UPSTASH
 # ============================================================
-from upstash_redis import Redis
+import httpx
 
-# Upstash pake REST API, bukan redis:// protocol
-r = Redis(
-    url=UPSTASH_REDIS_URL,
-    token=UPSTASH_REDIS_TOKEN,
-)
+# Upstash REST API — pakai httpx langsung, gak perlu package tambahan
+UPSTASH_HEADERS = {
+    "Authorization": f"Bearer {UPSTASH_REDIS_TOKEN}",
+    "Content-Type": "application/json",
+}
+
+def upstash_set(key, value):
+    r = httpx.post(
+        f"{UPSTASH_REDIS_URL}/set/{key}",
+        headers=UPSTASH_HEADERS,
+        content=value,
+        timeout=30,
+    )
+    return r.status_code == 200
 
 # Upload training data (chunked biar nggak timeout)
 CHUNK_SIZE = 100
@@ -166,16 +175,18 @@ all_keys = []
 for i in range(0, len(training_data), CHUNK_SIZE):
     chunk = training_data[i:i + CHUNK_SIZE]
     chunk_key = f"{TRAINING_KEY}:chunk:{i // CHUNK_SIZE}"
-    r.set(chunk_key, json.dumps(chunk, ensure_ascii=False))
+    upstash_set(chunk_key, json.dumps(chunk, ensure_ascii=False))
     all_keys.append(chunk_key)
+    if (i // CHUNK_SIZE) % 10 == 0:
+        print(f"  ... uploaded chunk {i // CHUNK_SIZE + 1}/{(len(training_data) + CHUNK_SIZE - 1) // CHUNK_SIZE}")
 
 # Simpan index chunk
-r.set(f"{TRAINING_KEY}:index", json.dumps(all_keys))
-r.set(f"{TRAINING_KEY}:total", str(len(training_data)))
+upstash_set(f"{TRAINING_KEY}:index", json.dumps(all_keys))
+upstash_set(f"{TRAINING_KEY}:total", str(len(training_data)))
 
 # Upload chat profile (buat system prompt)
 my_name = me.first_name or "User"
-r.set(PROFILE_KEY, json.dumps({
+upstash_set(PROFILE_KEY, json.dumps({
     "name": my_name,
     "username": me.username or "",
     "user_id": me.id,
@@ -185,7 +196,7 @@ r.set(PROFILE_KEY, json.dumps({
 }, ensure_ascii=False))
 
 # Upload stats
-r.set(STATS_KEY, json.dumps({
+upstash_set(STATS_KEY, json.dumps({
     "total_messages": len(training_data),
     "total_chats": len(chat_stats),
     "scraped_at": datetime.now(WIB).isoformat(),
@@ -203,9 +214,19 @@ print(f"   Total pesan: {len(training_data)}")
 # ============================================================
 # CELL 6: VERIFIKASI — BACA BALIK DARI UPSTASH
 # ============================================================
-total_stored = int(r.get(f"{TRAINING_KEY}:total") or 0)
-profile = json.loads(r.get(PROFILE_KEY) or "{}")
-stats = json.loads(r.get(STATS_KEY) or "{}")
+def upstash_get(key):
+    r = httpx.get(
+        f"{UPSTASH_REDIS_URL}/get/{key}",
+        headers=UPSTASH_HEADERS,
+        timeout=30,
+    )
+    if r.status_code == 200:
+        return r.json().get("result")
+    return None
+
+total_stored = int(upstash_get(f"{TRAINING_KEY}:total") or 0)
+profile = json.loads(upstash_get(PROFILE_KEY) or "{}")
+stats = json.loads(upstash_get(STATS_KEY) or "{}")
 
 print(f"🔍 Verifikasi data di Upstash:")
 print(f"   Nama: {profile.get('name')}")
@@ -217,9 +238,9 @@ print(f"   Chat aktif: {stats.get('total_chats', 0)}")
 print(f"   Scraped: {stats.get('scraped_at')}")
 
 # Contoh baca chunk pertama
-idx = json.loads(r.get(f"{TRAINING_KEY}:index") or "[]")
+idx = json.loads(upstash_get(f"{TRAINING_KEY}:index") or "[]")
 if idx:
-    sample = json.loads(r.get(idx[0]) or "[]")[:5]
+    sample = json.loads(upstash_get(idx[0]) or "[]")[:5]
     print(f"\n📝 Contoh 5 pesan pertama:")
     for s in sample:
         who = "🔵 Kamu" if s["fromMe"] else "⚪ Lawan"
