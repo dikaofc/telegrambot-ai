@@ -7,6 +7,9 @@ set -e
 
 SESSION_NAME="tgaibot"
 
+# Pastikan data/ ada
+mkdir -p data
+
 # Cek .env
 if [ ! -f ".env" ]; then
     echo "[!] .env belum ada. Jalankan setup-termux.sh dulu!"
