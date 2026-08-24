@@ -263,7 +263,27 @@ async def main():
         sys.exit(1)
 
     print(f"[2/4] menyambungkan Telethon (api_id={config.api_id})...")
-    await client.start(phone=config.phone)
+    # Retry connection — database locked bisa terjadi kalau proses lama masih jalan
+    for attempt in range(3):
+        try:
+            await client.start(phone=config.phone)
+            break
+        except Exception as e:
+            if "database is locked" in str(e) and attempt < 2:
+                print(f"    database locked, coba lagi ({attempt + 1}/3)...")
+                # Kill proses python lain yang mungkin masih jalan
+                import subprocess
+                try:
+                    subprocess.run(["pkill", "-f", "python.*main.py"], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+                await asyncio.sleep(3)
+                # Re-init client dengan session baru
+                from telethon import TelegramClient
+                global client
+                client = TelegramClient(config.session_name, config.api_id, config.api_hash)
+            else:
+                raise
     ME = await client.get_me()
     print(f"[3/4] login sebagai @{ME.username or '-'} (id={ME.id})")
 
