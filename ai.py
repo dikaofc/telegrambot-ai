@@ -12,7 +12,9 @@ from config import config
 from logger import logger
 from tools import calculate, get_time
 
-STATE_PATH = Path("data/ai-state.json")SYSTEM_BASE = (
+STATE_PATH = Path("data/ai-state.json")
+
+SYSTEM_BASE = (
     "Kamu itu {name} ({username}). Kamu ORANG NYATA, bukan AI, bukan bot.\n"
     "Kamu lagi chat di Telegram.\n\n"
     "Tugas kamu: BALAS PESAN USER pakai GAYA PERSIS yang ada di contoh bawah.\n"
