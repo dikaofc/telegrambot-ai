@@ -138,35 +138,6 @@ class TrainingDataLoader:
         except Exception as e:
             logger.warning("gagal load training data dari Upstash: %s", e)
 
-    def get_style_examples(self, chat_id: str | None = None, limit: int = 30) -> list[dict]:
-        """Ambil contoh gaya chat dari training data + corpus real-time."""
-        # Gabung cache Upstash + corpus real-time
-        data = self._cache + [
-            {"text": c["text"], "fromMe": c["fromMe"], "chat_id": c["chat_id"]}
-            for c in self.corpus
-        ]
-        if not data:
-            print("    [style] TIDAK ADA training data!")
-            return []
-
-        # JANGAN filter per chat — ambil SEMUA data biar gaya lu keliatan
-        # (kecuali data terlalu dikit)
-
-        # Ambil yang dari "kamu" (fromMe=True) — ini gaya asli lu
-        mine = [d for d in data if d.get("fromMe")]
-        theirs = [d for d in data if not d.get("fromMe")]
-
-        print(f"    [style] total data: {len(data)}, dari kamu: {len(mine)}, lawan: {len(theirs)}")
-
-        # Ambil SEMUA contoh gaya kamu (terbaru dulu)
-        result = []
-        for m in mine[-limit:]:
-            result.append({"role": "assistant", "content": m["text"]})
-        for m in theirs[-limit:]:
-            result.append({"role": "user", "content": m["text"]})
-
-        return result
-
     def get_user_name(self) -> str:
         return self._profile.get("name", "User")
 
@@ -223,9 +194,34 @@ class AutoReply:
         self._cooldown_until = 0.0
         self._dirty = False
         # Real-time learning: corpus + buffer buat upload ke Upstash
-        self.corpus: list[dict] = []  # [{text, fromMe, chat_id, ts}]
-        self._pending_upload: list[dict] = []  # buffer belum di-upload
+        self.corpus: list[dict] = []  # [{text, fromMe, chat_id, ts}]        self._pending_upload: list[dict] = []  # buffer belum di-upload
         self._upload_task = None
+
+    def get_style_examples(self, chat_id: str | None = None, limit: int = 30) -> list[dict]:
+        """Ambil contoh gaya chat dari training data + corpus real-time."""
+        # Gabung cache Upstash + corpus real-time
+        data = self.training._cache + [
+            {"text": c["text"], "fromMe": c["fromMe"], "chat_id": c["chat_id"]}
+            for c in self.corpus
+        ]
+        if not data:
+            print("    [style] TIDAK ADA training data!")
+            return []
+
+        # Ambil yang dari "kamu" (fromMe=True) — ini gaya asli lu
+        mine = [d for d in data if d.get("fromMe")]
+        theirs = [d for d in data if not d.get("fromMe")]
+
+        print(f"    [style] total data: {len(data)}, dari kamu: {len(mine)}, lawan: {len(theirs)}")
+
+        # Ambil SEMUA contoh gaya kamu (terbaru dulu)
+        result = []
+        for m in mine[-limit:]:
+            result.append({"role": "assistant", "content": m["text"]})
+        for m in theirs[-limit:]:
+            result.append({"role": "user", "content": m["text"]})
+
+        return result
 
     # ── state persistence ───────────────────────────────────────────────────
     async def init(self) -> None:
@@ -549,7 +545,7 @@ class AutoReply:
             sys = SYSTEM_BASE.replace("{name}", display_name).replace("{username}", f"@{username}")
 
         # ── GAYA CHAT DARI DATA SCRAPE — ini yang paling penting ──
-        style_examples = self.training.get_style_examples(chat_id, limit=40)
+        style_examples = self.get_style_examples(chat_id, limit=40)
         if style_examples:
             mine = [e for e in style_examples if e["role"] == "assistant"]
             theirs = [e for e in style_examples if e["role"] == "user"]
