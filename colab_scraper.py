@@ -9,7 +9,7 @@
 # ============================================================
 # CELL 1: INSTALL DEPENDENCIES
 # ============================================================
-# !pip install telethon redis
+# !pip install telethon upstash-redis
 
 
 # ============================================================
@@ -151,13 +151,12 @@ print(f"   Chat kosong: {skipped_empty}")
 # ============================================================
 # CELL 5: UPLOAD KE UPSTASH
 # ============================================================
-import redis
+from upstash_redis import Redis
 
-# Fix: pakai from_url() karena versi redis di Colab gak support parameter url= langsung
-r = redis.Redis.from_url(
-    UPSTASH_REDIS_URL,
+# Upstash pake REST API, bukan redis:// protocol
+r = Redis(
+    url=UPSTASH_REDIS_URL,
     token=UPSTASH_REDIS_TOKEN,
-    decode_responses=True,
 )
 
 # Upload training data (chunked biar nggak timeout)

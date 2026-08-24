@@ -1,1 +1,1 @@
-!pip install telethon redis
+!pip install telethon upstash-redis

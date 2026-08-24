@@ -74,18 +74,17 @@ class TrainingDataLoader:
         self._reload_interval = 3600.0  # reload tiap jam
 
     async def _get_redis(self):
-        """Create redis connection to Upstash."""
+        """Create redis connection to Upstash via REST API."""
         if not config.upstash_configured:
             return None
         try:
-            import redis
-            return redis.Redis.from_url(
-                config.upstash_url,
+            from upstash_redis import Redis
+            return Redis(
+                url=config.upstash_url,
                 token=config.upstash_token,
-                decode_responses=True,
             )
         except ImportError:
-            logger.warning("redis package tidak terpasang — pip install redis")
+            logger.warning("upstash-redis tidak terpasang — pip install upstash-redis")
             return None
         except Exception as e:
             logger.warning("gagal koneksi Upstash: %s", e)
