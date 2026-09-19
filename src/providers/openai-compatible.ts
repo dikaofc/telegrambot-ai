@@ -40,7 +40,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
         },
         body: JSON.stringify({
           model,
-          messages: request.messages.map((m) => ({ role: m.role === "tool" ? "tool" : m.role, content: m.content })),
+          // strict upstreams (cehpoint, openai) reject role:"tool" without tool_call_id —
+          // fold tool results into user messages so every upstream accepts them
+          messages: request.messages.map((m) => (m.role === "tool"
+            ? { role: "user", content: `[tool ${m.toolName ?? "result"}]\n${m.content}` }
+            : { role: m.role, content: m.content })),
           tools: tools.length ? tools : undefined,
           tool_choice: tools.length ? "auto" : undefined,
           stream: true,
