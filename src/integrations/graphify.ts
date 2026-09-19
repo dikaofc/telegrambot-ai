@@ -140,9 +140,26 @@ export interface GraphViewNode {
 export type GraphViewLink = [from: number, to: number, relation: string];
 export interface GraphViewCommunity { id: number; name: string; count: number; cohesion?: number }
 
+/** Freshness of the *other* graphify artefacts (report / html) vs graph.json. */
+export interface GraphOutputs {
+  graphMtime?: string;
+  htmlMtime?: string;
+  reportMtime?: string;
+  /** Node count parsed out of GRAPH_REPORT.md's summary line, when available. */
+  reportNodes?: number;
+  reportEdges?: number;
+  /** true when GRAPH_REPORT.md describes a different build than graph.json. */
+  staleReport: boolean;
+  /** true when graph.html is older than graph.json. */
+  staleHtml: boolean;
+}
+
 export interface GraphViewPayload {
   workspace: string;
   builtAtCommit?: string;
+  /** Plain-language reason the graph looks empty/stale, or null when healthy. */
+  note: string | null;
+  outputs: GraphOutputs;
   /** Real totals of the whole graph, before the viewer node ceiling. */
   totals: { nodes: number; links: number; communities: number };
   /** How much of the graph this payload actually carries. */
@@ -158,6 +175,99 @@ export interface GraphViewPayload {
     questions: Array<{ type: string; question: string; why?: string }>;
   };
   generatedAt: string;
+}
+
+const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|php|cs|c|h|cpp|swift|vue|svelte)$/i;
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "graphify-out", ".next", "coverage", "vendor"]);
+
+function isoMtime(file: string): string | undefined {
+  try { return fs.statSync(file).mtime.toISOString(); } catch { return undefined; }
+}
+
+/** Parse graphify's `- 776 nodes · 2532 edges · 32 communities` summary line. */
+function parseReportSummary(text: string): { nodes: number; edges: number } | null {
+  const m = /(-?\d+)\s+nodes?\s*[·|-]\s*(-?\d+)\s+edges?/i.exec(text);
+  if (!m) return null;
+  const nodes = Number(m[1]), edges = Number(m[2]);
+  return Number.isFinite(nodes) && Number.isFinite(edges) ? { nodes, edges } : null;
+}
+
+function readOutputs(workspacePath: string, graphNodes: number): GraphOutputs {
+  const out = outDir(workspacePath);
+  const graphFile = path.join(out, "graph.json");
+  const htmlFile = path.join(out, "graph.html");
+  const reportFile = path.join(out, "GRAPH_REPORT.md");
+  const outputs: GraphOutputs = {
+    graphMtime: isoMtime(graphFile), htmlMtime: isoMtime(htmlFile), reportMtime: isoMtime(reportFile),
+    staleReport: false, staleHtml: false,
+  };
+  try {
+    const report = fs.readFileSync(reportFile, "utf8").slice(0, 4000);
+    const summary = parseReportSummary(report);
+    if (summary) {
+      outputs.reportNodes = summary.nodes;
+      outputs.reportEdges = summary.edges;
+      outputs.staleReport = summary.nodes !== graphNodes;
+    }
+  } catch { /* no report yet: nothing to compare */ }
+  if (outputs.graphMtime && outputs.htmlMtime) outputs.staleHtml = outputs.htmlMtime < outputs.graphMtime;
+  return outputs;
+}
+
+/** How much source the extractor can actually see inside a workspace. */
+function scanWorkspaceCode(workspacePath: string): { files: number; symlinkDirs: string[] } {
+  let files = 0;
+  const symlinkDirs: string[] = [];
+  const budget = { n: 0 };
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 4 || budget.n > 5000) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (budget.n++ > 5000) return;
+      if (e.isSymbolicLink()) {
+        try {
+          // a symlink the extractor will not descend into (e.g. a project mirror)
+          if (fs.statSync(path.join(dir, e.name)).isDirectory()) symlinkDirs.push(path.relative(workspacePath, path.join(dir, e.name)) || e.name);
+        } catch { /* broken link */ }
+        continue;
+      }
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name)) continue;
+        walk(path.join(dir, e.name), depth + 1);
+      } else if (CODE_EXT.test(e.name)) {
+        files++;
+      }
+    }
+  };
+  walk(workspacePath, 0);
+  return { files, symlinkDirs };
+}
+
+/**
+ * Explain an empty or stale graph in plain language. Returns null when the graph
+ * looks healthy — this is diagnosis, not decoration: the user asked "why is it
+ * empty" and the answer has to be on screen.
+ */
+export function graphDiagnosis(workspacePath: string, totals: { nodes: number; links: number }, outputs: GraphOutputs): string | null {
+  const parts: string[] = [];
+  if (totals.nodes <= 2) {
+    const scan = scanWorkspaceCode(workspacePath);
+    parts.push(`Graph hanya berisi ${totals.nodes} node dan ${totals.links} edge.`);
+    if (scan.files === 0) {
+      parts.push(`Workspace ini tidak punya file kode yang bisa diekstrak (0 file${scan.symlinkDirs.length ? `; extractor tidak menelusuri symlink ${scan.symlinkDirs.map((s) => `\`${s}\``).join(", ")}` : ""}).`);
+      parts.push("Build graph dari workspace yang berisi project aslinya, atau biarkan graph project dipublikasikan ke workspace ini (set default workspace = project root).");
+    } else {
+      parts.push(`Extractor cuma menemukan ${scan.files} file kode — kemungkinan isinya belum lengkap atau build terhenti.`);
+    }
+  }
+  if (outputs.staleReport) {
+    parts.push(`GRAPH_REPORT.md masih dari build lama (${outputs.reportNodes} node) sedangkan graph.json sekarang ${totals.nodes} node — jalankan graphify_build/update supaya output sinkron.`);
+  }
+  if (outputs.staleHtml) {
+    parts.push("graph.html lebih lama dari graph.json — viewer TeleAgent tetap baca graph.json terbaru, tapi output asli graphify belum di-regenerate.");
+  }
+  return parts.length ? parts.join(" ") : null;
 }
 
 /**
@@ -253,10 +363,15 @@ export function graphView(workspacePath: string, opts: { limit?: number } = {}):
     })),
   };
 
+  const totals = { nodes: allNodes.length, links: edges.length, communities: communityCount.size };
+  const outputs = readOutputs(workspacePath, totals.nodes);
+
   return {
     workspace: path.basename(workspacePath),
     builtAtCommit: str(raw.built_at_commit).slice(0, 12) || undefined,
-    totals: { nodes: allNodes.length, links: edges.length, communities: communityCount.size },
+    note: graphDiagnosis(workspacePath, totals, outputs),
+    outputs,
+    totals,
     shown: { nodes: nodes.length, links: shownLinks.length },
     limit,
     truncated: nodes.length < allNodes.length,
@@ -286,6 +401,67 @@ function outDir(workspacePath: string): string {
   return path.join(workspacePath, GRAPHIFY_OUT_DIR);
 }
 
+/** Project root = nearest ancestor of cwd containing package.json + src. */
+export function projectRootDir(start = process.cwd()): string | null {
+  let dir = path.resolve(start);
+  for (let i = 0; i < 4; i++) {
+    try {
+      if (fs.existsSync(path.join(dir, "package.json")) && fs.existsSync(path.join(dir, "src"))) return dir;
+    } catch { /* noop */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function sameDir(a: string, b: string): boolean {
+  try {
+    const ra = fs.realpathSync(path.resolve(a));
+    const rb = fs.realpathSync(path.resolve(b));
+    return ra === rb;
+  } catch { return path.resolve(a) === path.resolve(b); }
+}
+
+const PUBLISH_MARKER = ".published-from-project";
+
+/**
+ * Publish the canonical project-root graph into a workspace's graphify-out
+ * (real file copies + freshness marker). Makes the project graph visible
+ * from workspaces whose own tree is near-empty (e.g. `default`, which only
+ * holds a symlink the extractor cannot follow).
+ */
+export async function publishGraphToWorkspace(
+  sourceRoot: string, targetWs: string,
+): Promise<{ ok: boolean; detail: string; republished: boolean }> {
+  const srcOut = outDir(sourceRoot);
+  const srcGraph = path.join(srcOut, "graph.json");
+  if (!fs.existsSync(srcGraph)) {
+    return { ok: false, detail: `project graph missing at ${srcGraph} — build the project graph first`, republished: false };
+  }
+  const dstOut = outDir(targetWs);
+  const marker = path.join(dstOut, PUBLISH_MARKER);
+  try {
+    const srcStat = fs.statSync(srcGraph);
+    if (fs.existsSync(marker) && fs.existsSync(path.join(dstOut, "graph.json"))) {
+      const mark = JSON.parse(fs.readFileSync(marker, "utf8")) as { sourceMtimeMs?: number };
+      if (mark.sourceMtimeMs && mark.sourceMtimeMs >= srcStat.mtimeMs) {
+        return { ok: true, detail: "already up to date", republished: false };
+      }
+    }
+    fs.mkdirSync(dstOut, { recursive: true });
+    for (const f of ["graph.json", "graph.html", "GRAPH_REPORT.md", "manifest.json", ".graphify_analysis.json", ".graphify_labels.json"]) {
+      const s = path.join(srcOut, f);
+      if (fs.existsSync(s)) fs.copyFileSync(s, path.join(dstOut, f));
+    }
+    fs.writeFileSync(marker, JSON.stringify({ source: srcGraph, sourceMtimeMs: srcStat.mtimeMs, publishedAt: new Date().toISOString() }));
+    const nodes = (() => { try { return (JSON.parse(fs.readFileSync(srcGraph, "utf8")) as { nodes?: unknown[] }).nodes?.length ?? 0; } catch { return 0; } })();
+    return { ok: true, detail: `${nodes} nodes published to ${targetWs}`, republished: true };
+  } catch (e) {
+    return { ok: false, detail: `publish failed: ${String(e).slice(0, 200)}`, republished: false };
+  }
+}
+
 export interface GraphStatus {
   available: boolean;
   version?: string;
@@ -296,6 +472,8 @@ export interface GraphStatus {
   sizeBytes?: number;
   reportExists?: boolean;
   htmlExists?: boolean;
+  /** Plain-language reason the graph is empty/stale, or null when healthy. */
+  note?: string | null;
 }
 
 /** Real status: probes the binary + parses graphify-out/graph.json when present. */
@@ -315,14 +493,18 @@ export async function graphStatus(workspacePath: string): Promise<GraphStatus> {
         htmlExists: fs.existsSync(path.join(outDir(workspacePath), "graph.html")),
       };
     }
-    const raw = JSON.parse(fs.readFileSync(graphPath, "utf8")) as { nodes?: unknown[]; edges?: unknown[] };
+    const raw = JSON.parse(fs.readFileSync(graphPath, "utf8")) as { nodes?: unknown[]; links?: unknown[] };
+    const nodes = Array.isArray(raw.nodes) ? raw.nodes.length : undefined;
+    const edges = Array.isArray(raw.links) ? raw.links.length : undefined;
+    const outputs = readOutputs(workspacePath, nodes ?? 0);
     return {
       available: avail.ok, version: avail.version, built: true, graphPath,
-      nodes: Array.isArray(raw.nodes) ? raw.nodes.length : undefined,
-      edges: Array.isArray(raw.edges) ? raw.edges.length : undefined,
+      nodes,
+      edges,
       sizeBytes: st.size,
       reportExists: fs.existsSync(path.join(outDir(workspacePath), "GRAPH_REPORT.md")),
       htmlExists: fs.existsSync(path.join(outDir(workspacePath), "graph.html")),
+      note: graphDiagnosis(workspacePath, { nodes: nodes ?? 0, links: edges ?? 0 }, outputs),
     };
   } catch (e) {
     return { available: avail.ok, version: avail.version, built: false, graphPath };
@@ -349,8 +531,30 @@ async function runGraphify(args: string[], cwd: string, timeoutMs: number): Prom
   }
 }
 
-/** Build the knowledge graph for a workspace. Code-only = local AST, no API key. */
+/** Build the knowledge graph for a workspace. Code-only = local AST, no API key.
+ *
+ * Special case: the `default` workspace shows the PUBLISHED project graph
+ * (the extractor cannot follow the telegrambot-ai symlink, so a native
+ * default build would only ever contain dika.js). Any build/update targeting
+ * default therefore (re)publishes the project-root graph instead of running
+ * extract there — this also makes clobbering impossible through our tools.
+ */
 export function buildGraph(workspacePath: string, updateOnly = false, timeoutMs = 600_000): Promise<ToolResult> {
+  return buildGraphInner(workspacePath, updateOnly, timeoutMs);
+}
+
+async function buildGraphInner(workspacePath: string, updateOnly = false, timeoutMs = 600_000): Promise<ToolResult> {
+  const { resolveWorkspacePath } = await import("../workspace/manager.js");
+  const projectRoot = projectRootDir();
+  try {
+    const defWs = resolveWorkspacePath("default");
+    if (projectRoot && sameDir(workspacePath, defWs)) {
+      const pub = await publishGraphToWorkspace(projectRoot, defWs);
+      return pub.ok
+        ? { success: true, output: `default workspace shows published project graph (${pub.detail})` }
+        : { success: false, error: pub.detail };
+    }
+  } catch { /* fall through */ }
   const args = updateOnly ? ["update", "."] : ["extract", ".", "--code-only"];
   return runGraphify(args, workspacePath, timeoutMs);
 }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getEnv } from "../config/env.js";
 import { store } from "../database/store.js";
+import { projectRootDir, publishGraphToWorkspace, isTestEnv } from "../integrations/graphify.js";
 
 export interface WorkspaceInfo {
   id: string;
@@ -35,23 +36,106 @@ export function workspaceRoot(): string {
  * ("../..", "/etc", a symlinked-out dir) is rejected, because the workspace
  * boundary is what isolates one user's files from the rest of the host.
  */
+/** Layout-style exception: the project TeleAgent runs from stays readable by
+ * name and — like a mirror symlink pointing at it — through the workspace tree. */
+function projectRootAllowed(): string | null {
+  try {
+    const proj = projectRootDir();
+    return proj ? fs.realpathSync(proj) : null;
+  } catch { return null; }
+}
+
+/**
+ * Roots that are explicitly allowed to live outside WORKSPACE_ROOT, from
+ * `WORKSPACE_EXTRA_ROOTS` (comma or semicolon separated). This is how a
+ * deliberate "mirror another project into the workspace" symlink stays usable
+ * without opening the boundary for every symlink a task might drop in here.
+ * Entries that do not exist are ignored rather than silently trusted.
+ */
+export function allowedExtraRoots(): string[] {
+  const env = getEnv();
+  const roots = String(env.WORKSPACE_EXTRA_ROOTS ?? "")
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((p) => path.resolve(p))
+    .filter((p) => {
+      try { return fs.statSync(p).isDirectory(); } catch { return false; }
+    })
+    .map((p) => { try { return fs.realpathSync(p); } catch { return p; } });
+  return [...new Set(roots)];
+}
+
+function insideRoot(real: string, root: string): boolean {
+  return real === root || real.startsWith(root + path.sep);
+}
+
+/**
+ * Before realpath / after realpath forms of every root a workspace may resolve
+ * into: the workspace root itself (which may not exist yet on a fresh install),
+ * declared extras, and the project TeleAgent runs from.
+ */
+function allowedRealRoots(): string[] {
+  const root = workspaceRoot();
+  const roots = [path.resolve(root)];
+  try { roots.push(fs.realpathSync(root)); } catch { /* not created yet */ }
+  roots.push(...allowedExtraRoots());
+  const proj = projectRootAllowed();
+  if (proj) roots.push(proj);
+  return [...new Set(roots)];
+}
+
 export function resolveWorkspacePath(nameOrPath: string): string {
   const root = workspaceRoot();
   const raw = String(nameOrPath ?? "").trim();
   if (!raw) throw new Error("workspace name required");
+  // The project itself is addressable by its directory name: users mean the
+  // repo (e.g. /workspace telegrambot-ai), not an empty same-named folder.
+  // Explicit, documented exception to the root boundary below.
+  try {
+    const proj = projectRootDir();
+    if (proj && raw === path.basename(proj)) return proj;
+  } catch { /* fall through to normal resolution */ }
+  // An allowlisted outside root is addressable by its directory name too.
+  if (!path.isAbsolute(raw)) {
+    const named = allowedExtraRoots().find((r) => path.basename(r) === raw);
+    if (named) return named;
+  }
   const candidate = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw);
-  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
-    throw new Error(`workspace escape denied: ${raw} is outside ${root}`);
+  const allowed = allowedRealRoots();
+  if (!allowed.some((r) => insideRoot(candidate, r))) {
+    throw new Error(`workspace escape denied: ${raw} is outside ${root} (mirror yang memang dipakai bisa diizinkan lewat WORKSPACE_EXTRA_ROOTS)`);
   }
   fs.mkdirSync(candidate, { recursive: true });
   // Second pass on real paths so a symlink inside the root cannot point out of it
   // (compare realpaths, otherwise /var → /private/var breaks macOS).
-  const realRoot = fs.realpathSync(root);
   const real = fs.realpathSync(candidate);
-  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
-    throw new Error(`workspace escape denied: ${raw} resolves outside ${root}`);
+  if (!allowed.some((r) => insideRoot(real, r))) {
+    throw new Error(`workspace escape denied: ${raw} resolves outside ${root} (kalau ini mirror project yang memang dipakai, tambahkan root-nya ke WORKSPACE_EXTRA_ROOTS)`);
   }
   return candidate;
+}
+
+/**
+ * Symlinked directories directly inside a workspace. These are normally mirrors
+ * of a project that lives elsewhere; report whether the configuration actually
+ * allows reading through them, so "project saya ada di workspace tapi agent
+ * tidak bisa lihat" is answerable on screen.
+ */
+export function workspaceMirrors(workspacePath: string): Array<{ name: string; target: string; allowed: boolean }> {
+  const allowed = allowedRealRoots();
+  const out: Array<{ name: string; target: string; allowed: boolean }> = [];
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(workspacePath, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    if (!e.isSymbolicLink()) continue;
+    const full = path.join(workspacePath, e.name);
+    let real: string;
+    try { real = fs.realpathSync(full); } catch { continue; }
+    try { if (!fs.statSync(full).isDirectory()) continue; } catch { continue; }
+    out.push({ name: e.name, target: real, allowed: allowed.some((r) => insideRoot(real, r)) });
+  }
+  return out;
 }
 
 export function listWorkspaces(): string[] {
@@ -153,5 +237,14 @@ export function syncFilesystemWorkspaces(userId?: string): string[] {
       try { store.ensureWorkspace(name, resolveWorkspacePath(name), userId); done.push(name); } catch { /* noop */ }
     }
   } catch { /* non-fatal */ }
+  // Publish the canonical project graph into `default` (fire-and-forget):
+  // the extractor cannot follow the telegrambot-ai symlink, so without this
+  // the default workspace graph would only ever contain dika.js.
+  if (!isTestEnv()) {
+    try {
+      const root = projectRootDir();
+      if (root) void publishGraphToWorkspace(root, resolveWorkspacePath("default")).catch(() => { /* best-effort */ });
+    } catch { /* non-fatal */ }
+  }
   return done;
 }

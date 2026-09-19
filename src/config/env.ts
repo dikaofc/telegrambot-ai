@@ -29,6 +29,11 @@ const EnvSchema = z.object({
   // Known-failure memory: how many consecutive failures trigger a replan.
   AGENT_REPLAN_AFTER: z.coerce.number().default(3),
   WORKSPACE_ROOT: z.string().default("./workspaces"),
+  // Extra real roots that a symlink inside WORKSPACE_ROOT may point into, and
+  // that are addressable by their directory name (comma/semicolon separated).
+  // Empty = strict: anything resolving outside WORKSPACE_ROOT stays denied.
+  // Used for the "mirror the project into the workspace" layout.
+  WORKSPACE_EXTRA_ROOTS: z.string().default(""),
   DATABASE_URL: z.string().default("./data/teleagent.db"),
   REDIS_URL: z.string().default(""),
   SANDBOX_ENABLED: z.coerce.boolean().default(true),

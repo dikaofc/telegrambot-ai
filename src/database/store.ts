@@ -2,12 +2,15 @@ import { randomUUID } from "node:crypto";
 import type { SQLInputValue } from "./db.js";
 import { getDb } from "./db.js";
 
+// Every read goes through withSchemaRepair: a database that lost a table (or was
+// opened once without the full migration) heals itself instead of 500ing the
+// whole dashboard until the next restart.
 function one<T>(sql: string, ...params: SQLInputValue[]): T | undefined {
-  return getDb().prepare(sql).get(...params) as T | undefined;
+  return withSchemaRepair(() => getDb().prepare(sql).get(...params)) as T | undefined;
 }
 
 function all<T>(sql: string, ...params: SQLInputValue[]): T[] {
-  return getDb().prepare(sql).all(...params) as T[];
+  return withSchemaRepair(() => getDb().prepare(sql).all(...params)) as T[];
 }
 
 export const store = {

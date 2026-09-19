@@ -91,7 +91,8 @@ canvas#g-canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2p
   .gmain{flex:1 1 auto}
   .gtools{top:8px;left:8px;right:8px;gap:5px;flex-wrap:nowrap}
   .gsearch{flex:1 1 130px;min-width:110px;max-width:none}
-  .gstat{bottom:8px;left:8px;right:8px}
+  /* keep the readout clear of the collapsed bottom sheet */
+  .gstat{bottom:56px;left:8px;right:8px}
   .rail{position:fixed;left:0;right:0;bottom:0;width:auto;flex:0 0 auto;height:58dvh;max-height:58dvh;border-left:0;border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:var(--shadow-2);transform:translateY(calc(100% - 48px));transition:transform .22s cubic-bezier(.22,.61,.36,1);z-index:30}
   .rail.open{transform:none}
   .railhead{cursor:pointer;padding-top:6px;padding-bottom:6px}
@@ -484,6 +485,11 @@ function renderMeta(){
     +(PAY.builtAtCommit?'<span class="pill">commit '+esc(PAY.builtAtCommit)+'</span>':'');
   var n=$('g-note');
   if(n)n.textContent=PAY.truncated?('Menampilkan '+PAY.shown.nodes+' node dengan degree tertinggi dari '+PAY.totals.nodes+' — edge hanya yang kedua ujungnya tampil.'):'Seluruh graph tampil.';
+  // the backend's honest diagnosis of an empty/stale graph, shown not buried
+  var nb=$('g-note-box');
+  if(nb)nb.innerHTML=PAY.note?alertBox('warn','Graph perlu diperhatikan',PAY.note):'';
+  var pill=$('g-note-pill');
+  if(pill)pill.hidden=!PAY.note;
   var s=$('g-shown');
   if(s)s.textContent=PAY.shown.nodes+' / '+PAY.totals.nodes+' node · '+PAY.shown.links+' / '+PAY.totals.links+' edge';
 }
@@ -649,6 +655,9 @@ export function graphifyPage(): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<meta name="description" content="TeleAgent graph viewer — node, relasi, komunitas, dan insight dari graphify-out/graph.json.">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
 <meta name="theme-color" content="#f4f5f9" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <title>${GRAPH_PAGE_TITLE}</title>
@@ -660,7 +669,7 @@ ${GRAPH_CSS}
 <body>
 <div class="ghead top">
   <header class="topbar">
-    <div class="brand"><span class="dot" aria-hidden="true"></span><span id="g-title">Graphify</span><span class="tag">knowledge graph</span></div>
+    <div class="brand"><img src="/logo.svg" alt="" width="26" height="26" style="width:26px;height:26px;vertical-align:-6px;border-radius:8px"><span id="g-title">Graphify</span><span class="tag">knowledge graph</span></div>
     <div class="statusline" id="g-meta"></div>
     <div class="actions">
       <a class="btn" href="/diagram">Kembali ke dashboard</a>
@@ -682,6 +691,7 @@ ${GRAPH_CSS}
     </div>
     <div class="gstat">
       <span class="pill" id="g-shown">—</span>
+      <span class="pill warn" id="g-note-pill" hidden>graph perlu diperhatikan</span>
     </div>
     <div class="gempty" id="g-empty"><div class="box"><h2>Memuat graph…</h2></div></div>
   </div>
@@ -694,6 +704,7 @@ ${GRAPH_CSS}
       </div>
     </div>
     <div class="railbody" data-pane="detail">
+      <div id="g-note-box"></div>
       <div id="g-detail"></div>
       <h3>Catatan <span class="hint">data apa adanya</span></h3>
       <p class="sub" id="g-note" style="margin:0"></p>

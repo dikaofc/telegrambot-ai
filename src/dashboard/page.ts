@@ -123,7 +123,6 @@ a:hover{text-decoration:underline}
 .top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:saturate(160%) blur(10px);border-bottom:1px solid var(--line)}
 header.topbar{display:flex;align-items:center;gap:10px;padding:9px 14px;min-height:var(--hdr-h);flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:-.02em}
-.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .brand .tag{font-size:11px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
 .statusline{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .pill{font-size:11.5px;font-weight:600;padding:4px 9px;border-radius:999px;border:1px solid var(--line-strong);background:var(--surface);color:var(--muted);white-space:nowrap}
@@ -670,6 +669,7 @@ export function dashboardPage(opts?: { activeTab?: string }): string {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="description" content="TeleAgent Super Harness — live control plane: runs, approvals, workspaces, providers, usage, audit, knowledge graph.">
+<meta name="robots" content="noindex">
 <meta property="og:title" content="TeleAgent — Super Harness">
 <meta property="og:description" content="Live control plane untuk agent coding Telegram: runs, approvals, workspaces, providers, usage, audit, knowledge graph.">
 <meta property="og:type" content="website">
@@ -685,7 +685,7 @@ ${BASE_CSS}
 <a class="skip" href="#view">Lewati ke konten</a>
 <div class="top">
   <header class="topbar">
-    <div class="brand"><img src="/logo.svg" alt="TeleAgent" width="26" height="26" style="width:26px;height:26px;vertical-align:-6px;border-radius:7px"><span class="dot" aria-hidden="true"></span>TeleAgent<span class="tag">super harness</span></div>
+    <div class="brand"><img src="/logo.svg" alt="" width="26" height="26" style="width:26px;height:26px;vertical-align:-6px;border-radius:8px"><span>TeleAgent</span><span class="tag">super harness</span></div>
     <div class="statusline" role="status" aria-live="polite">
       <span class="pill" id="p-status">…</span>
       <span class="pill" id="p-provider">…</span>

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
+import path from "node:path";
 import { getEnv } from "../config/env.js";
 import { getLogger } from "../observability/logger.js";
 import { renderPrometheus, metrics } from "../observability/metrics.js";
@@ -157,9 +158,12 @@ export async function buildApiServer() {
   });
 
   // ---- dashboard (HTML open; JSON status public; mutations gated by API key) ----
-  type HtmlReply = { type(t: string): { send(x: string): void } };
+  type HtmlReply = { type(t: string): { send(x: string): void }; header(k: string, v: string): unknown };
   const serveDashboard = (reply: unknown, activeTab?: string): void => {
-    (reply as HtmlReply).type("text/html").send(dashboardPage({ activeTab }));
+    const r = reply as HtmlReply;
+    // Live control plane — never let browsers cache a stale shell/JS bundle.
+    try { r.header("cache-control", "no-store, no-cache, must-revalidate"); } catch { /* noop */ }
+    r.type("text/html").send(dashboardPage({ activeTab }));
   };
   // One real route per tab: deep links, refreshes and back/forward all work.
   for (const tab of DASHBOARD_TABS) {
@@ -254,14 +258,26 @@ export async function buildApiServer() {
   app.get("/api/workspaces", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const names = listWorkspaces();
-    return {
-      workspaces: names.map((n) => {
-        let p = n;
+    const out: Array<{ name: string; path: string; profile: ProjectProfile; project?: boolean }> = [];
+    // The project itself is always addressable (resolves to the repo root,
+    // not an empty folder) — first entry so it is never missed.
+    try {
+      const { projectRootDir } = await import("../integrations/graphify.js");
+      const proj = projectRootDir();
+      if (proj) {
         let profile: ProjectProfile = {};
-        try { p = resolveWorkspacePath(n); profile = detectProjectProfile(p); } catch { /* unreadable workspace */ }
-        return { name: n, path: p, profile };
-      }),
-    };
+        try { profile = detectProjectProfile(proj); } catch { /* noop */ }
+        out.push({ name: path.basename(proj), path: proj, profile, project: true });
+      }
+    } catch { /* best-effort */ }
+    for (const n of names) {
+      if (out.some((w) => w.name === n)) continue;
+      let p = n;
+      let profile: ProjectProfile = {};
+      try { p = resolveWorkspacePath(n); profile = detectProjectProfile(p); } catch { /* unreadable workspace */ }
+      out.push({ name: n, path: p, profile });
+    }
+    return { workspaces: out };
   });
   app.get("/api/providers", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
