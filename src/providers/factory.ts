@@ -1,4 +1,4 @@
-import { getEnv, providerConfigFor } from "../config/env.js";
+import { getEnv, providerConfigFor, KNOWN_PROVIDERS } from "../config/env.js";
 import { OpenAICompatibleProvider } from "./openai-compatible.js";
 import { AnthropicProvider } from "./anthropic.js";
 import type { LLMProvider } from "./types.js";
@@ -17,14 +17,7 @@ export function createProvider(name: string): LLMProvider {
   });
 }
 
+/** All switchable providers (one key serves whichever is selected via PROVIDER). */
 export function availableProviders(): string[] {
-  const env = getEnv();
-  const out: string[] = [];
-  if (env.NINEROUTER_API_KEY || env.NINEROUTER_BASE_URL) out.push("9router");
-  if (env.OPENAI_API_KEY) out.push("openai");
-  if (env.XAI_API_KEY) out.push("xai");
-  if (env.ANTHROPIC_API_KEY) out.push("anthropic");
-  out.push("ollama");
-  if (env.PROVIDER_BASE_URL) out.push("custom");
-  return [...new Set(out)];
+  return [...KNOWN_PROVIDERS];
 }

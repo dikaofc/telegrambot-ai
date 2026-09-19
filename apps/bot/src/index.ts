@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   console.log(`database       ${tick(h.database)}`);
   console.log(`sandbox        ${tick(h.sandbox)}`);
   console.log(`pty            ${tick(h.pty)}`);
-  console.log(`\nprovider:\n${env.DEFAULT_PROVIDER ?? "9router"}\n`);
+  console.log(`\nprovider:\n${env.PROVIDER ?? "9router"}\n`);
   console.log(`model:\n${env.DEFAULT_MODEL ?? "auto"}\n`);
   console.log(`access:\n${(env.BOT_ACCESS_MODE ?? "owner").toUpperCase()} ONLY`);
   console.log(`\nworkspace:\n${env.WORKSPACE_ROOT ?? "/workspaces"}`);

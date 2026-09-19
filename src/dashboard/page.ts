@@ -98,8 +98,8 @@ Workspaces:async v=>{
 },
 Providers:async v=>{
   const d=await api("/api/providers");
-  v.innerHTML='<section class="panel"><h3>Providers</h3><table><tr><th>provider</th><th>health</th><th>models</th></tr>'
-  +d.providers.map(p=>'<tr><td>'+esc(p.name)+'</td><td>'+(p.healthy?'<span class="pill ok">ok</span>':'<span class="pill bad">down</span>')+'</td><td>'+esc((p.models||[]).slice(0,8).join(", "))+'</td></tr>').join("")+'</table></section>';
+  v.innerHTML='<section class="panel"><h3>Providers (single universal key; switch via PROVIDER in .env)</h3><table><tr><th>provider</th><th>selected</th><th>health</th><th>models</th></tr>'
+  +d.providers.map(p=>'<tr><td>'+esc(p.name)+'</td><td>'+(p.selected?'<span class="pill ok">selected</span>':'<span class="pill">—</span>')+'</td><td>'+(p.healthy?'<span class="pill ok">ok</span>':'<span class="pill bad">down</span>')+'</td><td>'+esc((p.models||[]).slice(0,8).join(", "))+'</td></tr>').join("")+'</table></section>';
 },
 Usage:async v=>{
   const u=await api("/api/usage");

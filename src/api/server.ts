@@ -43,7 +43,7 @@ export async function buildApiServer() {
 
   app.get("/v1/providers", async () => ({ providers: availableProviders() }));
   app.get("/v1/models", async (req) => {
-    const q = (req.query as { provider?: string }).provider ?? env.DEFAULT_PROVIDER;
+    const q = (req.query as { provider?: string }).provider ?? env.PROVIDER;
     try { return { provider: q, models: await createProvider(q).models() }; }
     catch (e) { return { provider: q, models: [], error: String(e) }; }
   });
@@ -59,7 +59,7 @@ export async function buildApiServer() {
     const body = (req.body ?? {}) as { userId?: string; chatId?: string; workspace?: string; provider?: string; model?: string };
     const uid = store.upsertUser(String(body.userId ?? "api"), undefined);
     const chat = store.ensureChat(uid, String(body.chatId ?? "api"));
-    const id = ensureSession(uid, chat, body.workspace ?? "default", body.provider ?? env.DEFAULT_PROVIDER, body.model ?? env.DEFAULT_MODEL);
+    const id = ensureSession(uid, chat, body.workspace ?? "default", body.provider ?? env.PROVIDER, body.model ?? env.DEFAULT_MODEL);
     return { id };
   });
   app.get("/v1/sessions", async () => ({ note: "list via database; single-node keeps latest per chat" }));
@@ -106,7 +106,7 @@ export async function buildApiServer() {
     const h = await checkHealth();
     return {
       health: h, counts: store.counts(), activeRuns: activeRunCount(),
-      provider: env.DEFAULT_PROVIDER, model: env.DEFAULT_MODEL,
+      provider: env.PROVIDER, model: env.DEFAULT_MODEL,
       access: env.BOT_ACCESS_MODE, workspace: env.WORKSPACE_ROOT,
     };
   });
@@ -155,14 +155,16 @@ export async function buildApiServer() {
   app.get("/api/providers", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const names = availableProviders();
+    const selected = env.PROVIDER;
     const providers = await Promise.all(names.map(async (n) => {
+      if (n !== selected) return { name: n, selected: false, healthy: false, models: [] as string[] };
       try {
         const p = createProvider(n);
         const [healthy, models] = await Promise.all([p.health().catch(() => false), p.models().catch(() => [] as string[])]);
-        return { name: n, healthy, models };
-      } catch { return { name: n, healthy: false, models: [] as string[] }; }
+        return { name: n, selected: true, healthy, models };
+      } catch { return { name: n, selected: true, healthy: false, models: [] as string[] }; }
     }));
-    return { providers };
+    return { providers, selected };
   });
   app.get("/api/usage", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
@@ -266,11 +268,11 @@ export async function buildApiServer() {
     const last = (body.messages ?? []).filter((m) => m.role === "user").pop();
     const uid = store.upsertUser("api-gateway", undefined);
     const chat = store.ensureChat(uid, "api-gateway");
-    const sid = ensureSession(uid, chat, "default", env.DEFAULT_PROVIDER, body.model ?? "auto");
+    const sid = ensureSession(uid, chat, "default", env.PROVIDER, body.model ?? "auto");
     try {
       const handle = await startRun({
         userId: uid, chatDbId: chat, sessionId: sid, workspacePath: "default",
-        provider: env.DEFAULT_PROVIDER, model: body.model ?? "auto", input: last?.content ?? "",
+        provider: env.PROVIDER, model: body.model ?? "auto", input: last?.content ?? "",
       });
       let summary = "";
       for await (const ev of handle.events) {

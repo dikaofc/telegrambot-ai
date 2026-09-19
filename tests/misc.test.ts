@@ -18,9 +18,9 @@ process.env.WORKSPACE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "tele-miscws-
 
 describe("config hierarchy", () => {
   it("env > file > provider > system + scope merge", () => {
-    const env = loadEnv({ ...process.env, DEFAULT_PROVIDER: "openai", DEFAULT_MODEL: "gpt-x" });
+    const env = loadEnv({ ...process.env, PROVIDER: "openai", DEFAULT_MODEL: "gpt-x" });
     expect(resolveProvider(env, { provider: "xai" })).toBe("openai");
-    expect(resolveProvider({ ...env, DEFAULT_PROVIDER: "" } as never, {})).toBeTruthy();
+    expect(resolveProvider({ ...env, PROVIDER: "" } as never, {})).toBeTruthy();
     expect(resolveModel(env, {}, "my-model")).toBe("my-model");
     const merged = mergeScopes({ global: { provider: "a" }, session: { provider: "b" }, user: { model: "m" } });
     expect(merged.provider).toBe("b");
@@ -51,14 +51,14 @@ describe("orchestrator guards", () => {
     const chat = store.ensureChat(uid, "oc-c");
     const sid = ensureSession(uid, chat, "default", "9router", "auto");
     // force unreachable provider → deterministic probe path still completes
-    process.env.NINEROUTER_BASE_URL = "http://127.0.0.1:1/v1";
+    process.env.PROVIDER_BASE_URL = "http://127.0.0.1:1/v1";
     const h = await startRun({ userId: uid, chatDbId: chat, sessionId: sid, workspacePath: "guard-ws", provider: "9router", model: "auto", input: "list the workspace" });
     const events = [];
     for await (const e of h.events) events.push(e);
     expect(events.some((e) => e.type === "completed" || e.type === "error")).toBe(true);
     expect(recoveryMessage({ workspace: "w", lastState: "testing" })).toContain("server restarted");
     expect(recoverInterruptedRuns().length).toBe(0);
-    delete process.env.NINEROUTER_BASE_URL;
+    delete process.env.PROVIDER_BASE_URL;
   }, 60000);
   it("memory + compaction", async () => {
     openDatabase(process.env.DATABASE_URL);

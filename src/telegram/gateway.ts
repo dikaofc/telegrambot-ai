@@ -120,7 +120,7 @@ export function createBot(): Bot {
       const telegramId = String(userId);
       const dbUser = store.upsertUser(telegramId, ctx.from?.username);
       const chatDb = store.ensureChat(dbUser, String(ctx.chat.id));
-      const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().DEFAULT_PROVIDER, getEnv().DEFAULT_MODEL);
+      const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
       if (setting.key === "model") { store.updateSession(sessionId, { model: setting.value }); await ctx.reply(`model preference updated:\n${setting.value}`); return; }
       if (setting.key === "provider") { store.updateSession(sessionId, { provider: setting.value }); await ctx.reply(`provider updated:\n${setting.value}`); return; }
       if (setting.key === "workspace") { await ctx.reply(`workspace updated:\n${setting.value}`); return; }
@@ -197,7 +197,7 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   // workspace resolution: explicit "project X" or session default
   const setting = parseNaturalSettings(text);
   const workspaceName = setting?.key === "workspace" ? setting.value : "default";
-  const sessionId = ensureSession(dbUser, chatDb, workspaceName, env.DEFAULT_PROVIDER, env.DEFAULT_MODEL);
+  const sessionId = ensureSession(dbUser, chatDb, workspaceName, env.PROVIDER, env.DEFAULT_MODEL);
   const wsPath = resolveWorkspacePath(workspaceName === "default" ? await defaultWorkspace(sessionId) : workspaceName);
 
   // live status message (aggregated + debounced edits)
@@ -215,7 +215,7 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   let filesChanged: string[] = [];
   const attempted: string[] = [];
   try {
-    const handle = await startRun({ userId: dbUser, chatDbId: chatDb, sessionId, workspacePath: wsPath, provider: env.DEFAULT_PROVIDER, model: env.DEFAULT_MODEL, input: text });
+    const handle = await startRun({ userId: dbUser, chatDbId: chatDb, sessionId, workspacePath: wsPath, provider: env.PROVIDER, model: env.DEFAULT_MODEL, input: text });
     try { await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, renderStatusMessage(snap), { reply_markup: { inline_keyboard: runControlsKeyboard(handle.runId) } })); } catch { /* noop */ }
     let tokens = 0;
     for await (const ev of handle.events) {

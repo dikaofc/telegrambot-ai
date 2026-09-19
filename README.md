@@ -40,9 +40,10 @@ npm run tui
 See `.env.example`. Hierarchy: `environment > config file > provider defaults > system defaults`.
 Per-scope overrides: user > session > workspace > global.
 
-Providers: `9router` (default, OpenAI-compatible), `openai`, `xai`, `anthropic`
-(native), `ollama`, `custom` (any OpenAI-compatible `/v1` endpoint — no code
-changes needed). `model: auto` routes per task with fallback.
+Providers: satu config universal — `PROVIDER=9router|openai|xai|anthropic|ollama|custom`
++ satu `PROVIDER_API_KEY` untuk semua. Endpoint & model bawaan mengikuti
+`PROVIDER`; isi `PROVIDER_BASE_URL` hanya untuk override atau endpoint sendiri
+(`PROVIDER=custom`). `model: auto` routes per task dengan fallback.
 
 ## Architecture
 

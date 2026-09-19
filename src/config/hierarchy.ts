@@ -28,8 +28,8 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
 export function resolveProvider(env: AppEnv, file: FileConfig, sessionOverride?: string): string {
   if (sessionOverride) return sessionOverride;
   // hierarchy: environment > config file > provider defaults > system defaults
-  if (isExplicit("DEFAULT_PROVIDER") && env.DEFAULT_PROVIDER) return env.DEFAULT_PROVIDER;
-  if (env.DEFAULT_PROVIDER) return env.DEFAULT_PROVIDER;
+  if (isExplicit("PROVIDER") && env.PROVIDER) return env.PROVIDER;
+  if (env.PROVIDER) return env.PROVIDER;
   if (file.provider) return file.provider;
   return SYSTEM_DEFAULTS.provider;
 }

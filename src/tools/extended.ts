@@ -346,7 +346,7 @@ export function toolEnvInfo(workspacePath: string): ToolResult {
   const env = getEnv();
   return ok(JSON.stringify({
     workspace: workspacePath,
-    defaultProvider: env.DEFAULT_PROVIDER,
+    defaultProvider: env.PROVIDER,
     defaultModel: env.DEFAULT_MODEL,
     sandbox: { enabled: env.SANDBOX_ENABLED, runtime: env.SANDBOX_RUNTIME },
     agentMaxRetries: env.AGENT_MAX_RETRIES,

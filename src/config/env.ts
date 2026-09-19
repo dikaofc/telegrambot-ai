@@ -10,23 +10,15 @@ const EnvSchema = z.object({
   ALLOWED_CHAT_IDS: z.string().default(""),
   DEFAULT_AGENT: z.string().default("auto"),
   DEFAULT_MODEL: z.string().default("auto"),
-  DEFAULT_PROVIDER: z.string().default("9router"),
-  AGENT_MAX_RETRIES: z.coerce.number().default(5),
-  AGENT_TIMEOUT_MS: z.coerce.number().default(1_800_000),
-  NINEROUTER_BASE_URL: z.string().default("http://localhost:20128/v1"),
-  NINEROUTER_API_KEY: z.string().default(""),
-  OPENAI_BASE_URL: z.string().default("https://api.openai.com/v1"),
-  OPENAI_API_KEY: z.string().default(""),
-  XAI_BASE_URL: z.string().default("https://api.x.ai/v1"),
-  XAI_API_KEY: z.string().default(""),
-  ANTHROPIC_BASE_URL: z.string().default("https://api.anthropic.com"),
-  ANTHROPIC_API_KEY: z.string().default(""),
-  OLLAMA_BASE_URL: z.string().default("http://localhost:11434/v1"),
-  OLLAMA_API_KEY: z.string().default("ollama"),
-  PROVIDER_NAME: z.string().default(""),
+  // single universal provider config: PROVIDER selects a built-in preset
+  // (9router | openai | xai | anthropic | ollama | custom); the three
+  // PROVIDER_* vars override the preset or define a custom /v1 endpoint.
+  PROVIDER: z.string().default("9router"),
   PROVIDER_BASE_URL: z.string().default(""),
   PROVIDER_API_KEY: z.string().default(""),
-  PROVIDER_MODEL: z.string().default(""),
+  PROVIDER_MODEL: z.string().default("auto"),
+  AGENT_MAX_RETRIES: z.coerce.number().default(5),
+  AGENT_TIMEOUT_MS: z.coerce.number().default(1_800_000),
   WORKSPACE_ROOT: z.string().default("/workspaces"),
   DATABASE_URL: z.string().default("./data/teleagent.db"),
   REDIS_URL: z.string().default(""),
@@ -83,29 +75,28 @@ export function parseIdList(raw: string): Array<number | string> {
     .map((s) => (/^-?\d+$/.test(s) ? Number(s) : s));
 }
 
+/** Built-in endpoint presets. One API key (PROVIDER_API_KEY) serves all of them. */
+const PRESETS: Record<string, { baseUrl: string; defaultModel: string }> = {
+  "9router": { baseUrl: "http://localhost:20128/v1", defaultModel: "auto" },
+  ninerouter: { baseUrl: "http://localhost:20128/v1", defaultModel: "auto" },
+  openai: { baseUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini" },
+  xai: { baseUrl: "https://api.x.ai/v1", defaultModel: "grok-beta" },
+  anthropic: { baseUrl: "https://api.anthropic.com", defaultModel: "claude-3-5-sonnet-latest" },
+  ollama: { baseUrl: "http://localhost:11434/v1", defaultModel: "llama3.1" },
+};
+
+export const KNOWN_PROVIDERS = ["9router", "openai", "xai", "anthropic", "ollama", "custom"];
+
 export function providerConfigFor(name: string, env: AppEnv): { baseUrl: string; apiKey: string; defaultModel: string } {
-  switch (name) {
-    case "9router":
-    case "ninerouter":
-      return { baseUrl: env.NINEROUTER_BASE_URL, apiKey: env.NINEROUTER_API_KEY, defaultModel: "auto" };
-    case "openai":
-      return { baseUrl: env.OPENAI_BASE_URL, apiKey: env.OPENAI_API_KEY, defaultModel: "gpt-4o-mini" };
-    case "xai":
-      return { baseUrl: env.XAI_BASE_URL, apiKey: env.XAI_API_KEY, defaultModel: "grok-beta" };
-    case "anthropic":
-      return { baseUrl: env.ANTHROPIC_BASE_URL, apiKey: env.ANTHROPIC_API_KEY, defaultModel: "claude-3-5-sonnet-latest" };
-    case "ollama":
-      return { baseUrl: env.OLLAMA_BASE_URL, apiKey: env.OLLAMA_API_KEY, defaultModel: "llama3.1" };
-    case "custom":
-      return {
-        baseUrl: env.PROVIDER_BASE_URL || env.PROVIDER_NAME,
-        apiKey: env.PROVIDER_API_KEY,
-        defaultModel: env.PROVIDER_MODEL || "auto",
-      };
-    default:
-      if (env.PROVIDER_BASE_URL) {
-        return { baseUrl: env.PROVIDER_BASE_URL, apiKey: env.PROVIDER_API_KEY, defaultModel: env.PROVIDER_MODEL || "auto" };
-      }
-      return { baseUrl: env.NINEROUTER_BASE_URL, apiKey: env.NINEROUTER_API_KEY, defaultModel: "auto" };
-  }
+  const preset = PRESETS[name];
+  const selected = name === env.PROVIDER;
+  // An explicit PROVIDER_BASE_URL overrides the preset, but only for the
+  // selected provider (or for custom/unknown names which have no preset).
+  const baseUrl = preset
+    ? (selected && isExplicit("PROVIDER_BASE_URL") && env.PROVIDER_BASE_URL ? env.PROVIDER_BASE_URL : preset.baseUrl)
+    : env.PROVIDER_BASE_URL;
+  const defaultModel = isExplicit("PROVIDER_MODEL") && env.PROVIDER_MODEL
+    ? env.PROVIDER_MODEL
+    : (preset?.defaultModel ?? "auto");
+  return { baseUrl, apiKey: env.PROVIDER_API_KEY, defaultModel };
 }

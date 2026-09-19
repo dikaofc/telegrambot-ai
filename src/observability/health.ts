@@ -61,7 +61,7 @@ export async function checkHealth(opts?: { checkProvider?: () => Promise<boolean
     try { provider = await opts.checkProvider(); } catch { provider = false; }
   } else {
     provider = true;
-    detail.provider = `${env.DEFAULT_PROVIDER} (deferred live check)`;
+    detail.provider = `${env.PROVIDER} (deferred live check)`;
   }
   const all = telegram && database && workspace && pty;
   return {

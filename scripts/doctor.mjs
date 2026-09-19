@@ -11,8 +11,9 @@ function check(name, fn) {
 
 const env = process.env;
 check("Telegram token", () => { if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN missing"); return "present"; });
-check("provider", () => env.DEFAULT_PROVIDER || "9router (default)");
-check("API endpoint", () => env.NINEROUTER_BASE_URL || env.OPENAI_BASE_URL || "default");
+check("provider", () => `${env.PROVIDER || "9router (default)"} (single universal config)`);
+check("API endpoint", () => env.PROVIDER_BASE_URL || `preset: ${env.PROVIDER || "9router"}`);
+check("API key", () => { if (!env.PROVIDER_API_KEY) throw new Error("PROVIDER_API_KEY missing"); return "present"; });
 check("model", () => env.DEFAULT_MODEL || "auto");
 check("database", () => { fs.mkdirSync("./data", { recursive: true }); return "sqlite path writable"; });
 check("Docker", () => { try { execSync("docker info", { stdio: "pipe" }); return "available"; } catch { return "not available (local sandbox fallback)"; } });

@@ -139,11 +139,11 @@ describe("todos / memory / profile / env", () => {
     expect(rec.output).toContain("pnpm");
   });
   it("env_info leaks no secrets", () => {
-    process.env.NINEROUTER_API_KEY = "test-key-should-not-appear";
+    process.env.PROVIDER_API_KEY = "test-key-should-not-appear";
     const out = toolEnvInfo("/ws").output ?? "";
     expect(out).not.toContain("test-key-should-not-appear");
     expect(out).toContain("defaultProvider");
-    delete process.env.NINEROUTER_API_KEY;
+    delete process.env.PROVIDER_API_KEY;
   });
   it("project profile detects node project", async () => {
     const ws = mkws();
