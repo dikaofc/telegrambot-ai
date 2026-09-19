@@ -298,6 +298,42 @@ export async function buildApiServer() {
     return explainNode(resolveWorkspacePath(body.workspace ?? "default"), body.symbol);
   });
 
+  // ---- live diagram: workspace + file changes + graphify (real-time) ----
+  app.get("/api/diagram", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const q = (req.query as { workspace?: string }).workspace ?? "default";
+    const wsPath = resolveWorkspacePath(q);
+    const { workspaceTree } = await import("../workspace/manager.js");
+    const { graphStatus } = await import("../integrations/graphify.js");
+    const tree = workspaceTree(wsPath, 120);
+    const runs = store.listRuns(undefined, 10) as Array<{ id: string; input: string; status: string; created_at?: string }>;
+    const recentFiles = store.auditList(20).filter((l) => (l as { filesChanged?: string }).filesChanged || (l as { tool?: string }).tool === "write_file" || (l as { tool?: string }).tool === "edit_file").slice(0, 15);
+    // better: get recent tool calls with files
+    const toolCalls = store.auditList(30) as Array<{ tool: string; created_at?: string; filesChanged?: string }>;
+    let g: Awaited<ReturnType<typeof graphStatus>> | null = null;
+    try { g = await graphStatus(wsPath); } catch { g = { available: false, built: false }; }
+    let gitStat = "";
+    try {
+      const { gitTools } = await import("../tools/git.js");
+      const s = await gitTools.status(wsPath);
+      gitStat = (s.output ?? "").slice(0, 2000);
+    } catch { /* noop */ }
+    // Try to load graph.json nodes/edges for live viz (cap 200)
+    let graph: { nodes: Array<{ id: string; label: string; type?: string }>; edges: Array<{ from: string; to: string; label?: string }> } | null = null;
+    try {
+      const { default: fs } = await import("node:fs");
+      const { default: path } = await import("node:path");
+      const gp = path.join(wsPath, "graphify-out", "graph.json");
+      if (fs.existsSync(gp)) {
+        const raw = JSON.parse(fs.readFileSync(gp, "utf8")) as { nodes?: Array<{ id: string; label?: string; type?: string }>; edges?: Array<{ source?: string; target?: string; from?: string; to?: string; label?: string }> };
+        const nodes = (raw.nodes ?? []).slice(0, 120).map((n) => ({ id: String(n.id ?? n.label), label: String(n.label ?? n.id), type: n.type }));
+        const edges = (raw.edges ?? []).slice(0, 200).map((e) => ({ from: String(e.from ?? e.source), to: String(e.to ?? e.target), label: e.label }));
+        graph = { nodes, edges };
+      }
+    } catch { /* no graph */ }
+    return { workspace: q, wsPath, tree, runs, toolCalls, graphStatus: g, graph, gitStat, generatedAt: new Date().toISOString() };
+  });
+
   app.get("/v1/ws/sessions/:id", { websocket: true }, (socket: unknown) => {
     const sock = socket as { on(ev: string, cb: (raw: Buffer) => void): void; send(data: string): void };
     let snap = emptySnapshot();

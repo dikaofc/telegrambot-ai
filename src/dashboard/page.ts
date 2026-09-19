@@ -77,7 +77,7 @@ label{font-weight:800;text-transform:uppercase;font-size:12px;display:block;marg
 <nav id="tabs"></nav>
 <main id="view"></main>
 <script>
-const TABS=["Status","Sessions","Runs","Approvals","Workspaces","Providers","Usage","Audit","Settings","Graphify"];
+const TABS=["Status","Diagram","Sessions","Runs","Approvals","Workspaces","Providers","Usage","Audit","Settings","Graphify"];
 let cur="Status";
 const $=id=>document.getElementById(id);
 function key(){return localStorage.getItem("teleagent_key")||""}
@@ -109,6 +109,41 @@ Status:async v=>{
   v.innerHTML='<div class="panel"><h3>Health</h3><pre>'+esc(JSON.stringify(s.health,null,2))+'</pre></div>'
   +'<div class="panel"><h3>Counts</h3><div class="grid">'+Object.entries(s.counts).map(([k,val])=>'<div class="card"><b>'+val+'</b><span>'+esc(k)+'</span></div>').join("")+'</div></div>'
   +'<div class="panel"><h3>Runtime</h3><pre>'+esc(JSON.stringify({provider:s.provider,model:s.model,activeRuns:s.activeRuns,access:s.access,workspace:s.workspace},null,2))+'</pre></div>';
+},
+Diagram:async v=>{
+  const wsSel = localStorage.getItem("diagram_ws")||"default";
+  const d = await api("/api/diagram?workspace="+encodeURIComponent(wsSel));
+  const treeHtml = d.tree.length ? d.tree.map(f=>'<div style="border:2px solid var(--ink);padding:6px 10px;background:#fff;box-shadow:2px 2px 0 var(--ink);margin:4px 0;font-family:JetBrains Mono,monospace;font-size:12px">'+esc(f)+'</div>').join("") : '<div class="panel">Belum ada file — workspace masih kosong</div>';
+  const runsHtml = d.runs.length ? d.runs.map(r=>'<tr><td><code>'+esc(r.id.slice(0,8))+'</code></td><td>'+esc(String(r.input).slice(0,60))+'</td><td><span class="badge">'+esc(r.status)+'</span></td><td>'+esc((r.created_at||"").slice(0,19))+'</td></tr>').join("") : '<tr><td colspan=4>Belum ada runs</td></tr>';
+  const gitHtml = d.gitStat ? '<pre>'+esc(d.gitStat.slice(0,1500))+'</pre>' : '<pre>clean</pre>';
+  const g = d.graphStatus;
+  const gInfo = g ? '<div class="grid"><div class="card"><b>'+(g.built?"YES":"NO")+'</b><span>graph built</span></div><div class="card"><b>'+(g.nodes??"—")+'</b><span>nodes</span></div><div class="card"><b>'+(g.edges??"—")+'</b><span>edges</span></div><div class="card"><b>'+(g.available?"OK":"NO CLI")+'</b><span>graphify</span></div></div>' : '<div class="panel">graphify belum ada</div>';
+  // simple SVG for graph: nodes as boxes, edges as lines (real data, not mock)
+  let svg = "";
+  if(d.graph && d.graph.nodes.length){
+    const nodes = d.graph.nodes.slice(0,40);
+    const edges = d.graph.edges.slice(0,60);
+    const W=900, H=320, cols=8;
+    const pos = new Map();
+    nodes.forEach((n,i)=>{ const x= 80 + (i%cols)*110, y= 40 + Math.floor(i/cols)*70; pos.set(n.id,{x,y}); });
+    let lines = edges.map(e=>{ const a=pos.get(e.from), b=pos.get(e.to); if(!a||!b) return ""; return '<line x1="'+a.x+'" y1="'+a.y+'" x2="'+b.x+'" y2="'+b.y+'" stroke="#0a0a0a" stroke-width="2" opacity="0.35"/>'; }).join("");
+    let boxes = nodes.map(n=>{ const p=pos.get(n.id); return '<g><rect x="'+(p.x-45)+'" y="'+(p.y-14)+'" width="90" height="28" rx="0" fill="#fff" stroke="#0a0a0a" stroke-width="3"/><text x="'+p.x+'" y="'+(p.y+4)+'" text-anchor="middle" font-size="10" font-weight="800" font-family="JetBrains Mono,monospace">'+esc(n.label.slice(0,14))+'</text></g>'; }).join("");
+    svg = '<div class="panel" style="overflow:auto"><div style="min-width:900px"><svg width="'+W+'" height="'+H+'" style="background:#fff;border:4px solid var(--ink);display:block">'+lines+boxes+'</svg></div><div style="margin-top:8px;font-weight:700">Live Graph — '+nodes.length+' nodes, '+edges.length+' edges • workspace: '+esc(d.workspace)+' • '+new Date(d.generatedAt).toLocaleTimeString()+'</div></div>';
+  } else {
+    svg = '<div class="panel">Graph belum dibangun — buka tab Graphify lalu BUILD, atau tunggu agent yang otomatis build saat ada task. Status: '+(g? (g.built?"built":"not built"):"unknown")+'</div>';
+  }
+  const wsOpts = ['default','telegrambot-ai'].map(n=>'<option value="'+n+'"'+(n===wsSel?' selected':"")+'>'+n+'</option>').join("");
+  // also list real workspaces from API
+  let wsList = "";
+  try{ const wss=await api("/api/workspaces"); wsList=wss.workspaces.map(w=>'<option value="'+esc(w.name)+'"'+(w.name===wsSel?' selected':"")+'>'+esc(w.name)+'</option>').join(""); }catch{}
+  v.innerHTML='<div class="panel"><h3>Live Diagram — Workspace & File Activity</h3><div class="row"><label>Workspace</label><select id="diag-ws" onchange="localStorage.setItem(\'diagram_ws\',this.value);VIEWS.Diagram(document.getElementById(\'view\'))">'+(wsList||wsOpts)+'</select><label style="margin-left:8px"><input type="checkbox" id="diag-auto" checked> Auto refresh (3s)</label><span style="margin-left:auto;font-weight:800">Update: '+new Date(d.generatedAt).toLocaleTimeString()+'</span></div></div>'
+  +'<div class="grid" style="grid-template-columns:1.2fr 1fr;gap:12px"><div class="panel"><h3>File Tree (live, 120 files)</h3><div style="max-height:380px;overflow:auto">'+treeHtml+'</div></div><div class="panel"><h3>Git Status</h3>'+gitHtml+'</div></div>'
+  +'<div class="panel"><h3>Recent Runs (live)</h3><table><tr><th>id</th><th>input</th><th>status</th><th>time</th></tr>'+runsHtml+'</table></div>'
+  +svg
+  +'<div class="panel"><h3>Graphify Live</h3>'+gInfo+'<pre>'+esc(JSON.stringify(g,null,2))+'</pre></div>';
+  // auto refresh if checked
+  const chk=document.getElementById("diag-auto");
+  if(chk && chk.checked){ setTimeout(()=>{ if(cur==="Diagram") VIEWS.Diagram(v); },3000); }
 },
 Sessions:async v=>{
   const d=await api("/api/sessions?limit=50");
