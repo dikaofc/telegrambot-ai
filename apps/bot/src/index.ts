@@ -5,14 +5,26 @@ import { openDatabase } from "../../../src/database/db.js";
 import { createBot } from "../../../src/telegram/gateway.js";
 import { applyBotMenu } from "../../../src/telegram/commands.js";
 import { buildApiServer } from "../../../src/api/server.js";
+import { listenWithFallback } from "../../../src/api/listen.js";
 import { recoverInterruptedRuns } from "../../../src/agent/recovery.js";
 
 async function main(): Promise<void> {
-  loadEnv();
+  const env = loadEnv();
   const log = getLogger();
   openDatabase();
+  // Ensure workspace dirs exist + registered so dashboard/TUI never look empty
+  try {
+    const { ensureWorkspaceDirs, listWorkspaces, resolveWorkspacePath } = await import("../../../src/workspace/manager.js");
+    const { store } = await import("../../../src/database/store.js");
+    ensureWorkspaceDirs();
+    for (const name of listWorkspaces()) {
+      try { store.ensureWorkspace(name, resolveWorkspacePath(name)); } catch { /* noop */ }
+    }
+    if (listWorkspaces().length === 0) {
+      try { store.ensureWorkspace("default", resolveWorkspacePath("default")); } catch { /* noop */ }
+    }
+  } catch { /* non-fatal */ }
 
-  const env = process.env;
   console.log("TELEAGENT v1.0.0\n");
   const h = await checkHealth();
   const tick = (ok: boolean): string => (ok ? "✓" : "✗");
@@ -23,17 +35,17 @@ async function main(): Promise<void> {
   console.log(`\nprovider:\n${env.PROVIDER ?? "9router"}\n`);
   console.log(`model:\n${env.DEFAULT_MODEL ?? "auto"}\n`);
   console.log(`access:\n${(env.BOT_ACCESS_MODE ?? "owner").toUpperCase()} ONLY`);
-  console.log(`\nworkspace:\n${env.WORKSPACE_ROOT ?? "/workspaces"}`);
+  console.log(`\nworkspace:\n${env.WORKSPACE_ROOT ?? "./workspaces"}`);
   console.log("\nagent:\nREADY");
 
   recoverInterruptedRuns();
 
   // internal API (health/metrics/REST/WS/gateway) alongside the bot
   const api = await buildApiServer();
-  const port = Number(env.PORT ?? 49374);
-  await api.listen({ port, host: "0.0.0.0" });
-  log.info({ event: "api.listening", port }, "api listening");
-  console.log(`\ndashboard:\nhttp://localhost:${port}\n`);
+  const port = Number(env.PORT ?? 49375);
+  const actualPort = await listenWithFallback(api, port, "0.0.0.0");
+  log.info({ event: "api.listening", port: actualPort }, "api listening");
+  console.log(`\ndashboard:\nhttp://localhost:${actualPort}\n`);
 
   if (!env.TELEGRAM_BOT_TOKEN) {
     log.warn("TELEGRAM_BOT_TOKEN missing — bot not started, api only");

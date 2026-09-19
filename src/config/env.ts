@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 
 const EnvSchema = z.object({
@@ -19,7 +21,7 @@ const EnvSchema = z.object({
   PROVIDER_MODEL: z.string().default("auto"),
   AGENT_MAX_RETRIES: z.coerce.number().default(5),
   AGENT_TIMEOUT_MS: z.coerce.number().default(1_800_000),
-  WORKSPACE_ROOT: z.string().default("/workspaces"),
+  WORKSPACE_ROOT: z.string().default("./workspaces"),
   DATABASE_URL: z.string().default("./data/teleagent.db"),
   REDIS_URL: z.string().default(""),
   SANDBOX_ENABLED: z.coerce.boolean().default(true),
@@ -35,7 +37,7 @@ const EnvSchema = z.object({
   MAX_DAILY_TOKENS: z.coerce.number().default(1_000_000),
   TELEAGENT_API_KEY: z.string().default(""),
   LOG_LEVEL: z.string().default("info"),
-  PORT: z.coerce.number().default(49374),
+  PORT: z.coerce.number().default(49375),
 });
 
 export type AppEnv = z.infer<typeof EnvSchema>;
@@ -43,14 +45,50 @@ export type AppEnv = z.infer<typeof EnvSchema>;
 let cached: AppEnv | null = null;
 let explicitKeys: Set<string> = new Set();
 
+/** Minimal .env loader (no deps). Never overrides real environment. */
+function loadDotEnvFile(): void {
+  const candidates = [
+    path.resolve(process.cwd(), ".env"),
+    path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../.env"),
+  ];
+  for (const f of candidates) {
+    let content = "";
+    try { content = fs.readFileSync(f, "utf8"); } catch { continue; }
+    for (const rawLine of content.split("\n")) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq < 0) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (!key || process.env[key] !== undefined) continue;
+      process.env[key] = val;
+    }
+    break;
+  }
+}
+
+function normalizeEnv(data: AppEnv): AppEnv {
+  // WORKSPACE_ROOT="/" would expose the whole filesystem — migrate to ./workspaces
+  if (!data.WORKSPACE_ROOT || data.WORKSPACE_ROOT === "/") {
+    data.WORKSPACE_ROOT = "./workspaces";
+    process.env.WORKSPACE_ROOT = "./workspaces";
+  }
+  return data;
+}
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
+  if (source === process.env) loadDotEnvFile();
   const parsed = EnvSchema.safeParse(source);
   if (!parsed.success) {
     throw new Error(`Invalid environment: ${parsed.error.message}`);
   }
-  cached = parsed.data;
+  cached = normalizeEnv(parsed.data);
   explicitKeys = new Set(Object.keys(source));
-  return parsed.data;
+  return cached;
 }
 
 /** Always reflects live process.env (environment beats all other scopes). */

@@ -85,7 +85,25 @@ async function main(): Promise<void> {
   loadEnv();
   openDatabase();
   const env = getEnv();
-  console.log(`TeleAgent TUI — dashboard also at http://localhost:${env.PORT}`);
+  try {
+    const { ensureWorkspaceDirs, listWorkspaces, resolveWorkspacePath } = await import("../../../src/workspace/manager.js");
+    ensureWorkspaceDirs();
+    for (const name of listWorkspaces()) {
+      try { store.ensureWorkspace(name, resolveWorkspacePath(name)); } catch { /* noop */ }
+    }
+  } catch { /* non-fatal */ }
+  // Start dashboard API in background so `npm run tui` also serves the dashboard.
+  // If bot/api already runs on the same port, just reuse it (no crash).
+  let dashPort = env.PORT;
+  try {
+    const { buildApiServer } = await import("../../../src/api/server.js");
+    const { listenWithFallback } = await import("../../../src/api/listen.js");
+    const api = await buildApiServer();
+    dashPort = await listenWithFallback(api, env.PORT, "0.0.0.0");
+  } catch (e) {
+    console.log(`dashboard: port ${env.PORT} sudah dipakai proses lain — pakai yang sudah jalan (http://localhost:${env.PORT}).`);
+  }
+  console.log(`TeleAgent TUI — dashboard at http://localhost:${dashPort}`);
   console.log(await statusText());
   console.log("type 'help' for commands.");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: "teleagent> " });

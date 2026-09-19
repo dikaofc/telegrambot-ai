@@ -37,7 +37,7 @@
 - **Harness beneran, bukan chat wrapper.** 70+ tools real: baca/tulis file, PTY shell, background `npm run dev`, git + worktree, sqlite, secret scan, audit deps, coverage, sampai scout subagent yang riset codebase pakai fresh context.
 - **Aman by default.** Risk `SAFE→CRITICAL`: auto / tanya dulu / tolak. `rm -rf /`, `mkfs`, `shutdown`, ambil host filesystem → langsung `CRITICAL deny`. SSRF blok, upload cek traversal & zip-bomb, secret di-redact.
 - **Ringan di mana aja.** Idle 60–120 MB, SQLite WAL (gak butuh Redis/Postgres kecuali mau scale), jalan di VPS, Linux, macOS, Windows, bahkan **Android Termux**.
-- **Dashboard + TUI se-live Telegram.** Status, run, approval (approve/reject 1-klik), usage, audit — semua ada di `http://localhost:49374` dan di `npm run tui` (SSH-friendly).
+- **Dashboard + TUI se-live Telegram.** Status, run, approval (approve/reject 1-klik), usage, audit — semua ada di `http://localhost:49375` dan di `npm run tui` (SSH-friendly).
 
 ---
 
@@ -139,10 +139,10 @@ git clone <repo> && cd teleagent
 cp .env.example .env   # isi TELEGRAM_BOT_TOKEN + PROVIDER_API_KEY
 npm install
 npm run setup          # bikin data/ + workspaces/default + copy .env kalau belum ada
-npm run dev            # bot polling + API + dashboard di :49374
+npm run dev            # bot polling + API + dashboard di :49375
 ```
 
-Buka dashboard: **http://localhost:49374**
+Buka dashboard: **http://localhost:49375**
 
 Production (butuh Postgres/Redis + sandbox worker):
 
@@ -242,7 +242,7 @@ Agent Orchestrator ──→ Providers (9Router/openai/xAI/Anthropic/ollama/cust
    │
    └────→ Tool Executor (70+ tools) → Workspace / Sandbox (PTY, git, graphify)
                                             │
-                              Dashboard :49374 + TUI (same live data)
+                              Dashboard :49375 + TUI (same live data)
 ```
 
 <p align="center"><img src="./docs/flow.svg" alt="agent loop" width="960"/></p>
@@ -281,7 +281,7 @@ npm run dev          # atau: docker compose up -d  (nambah postgres/redis/sandbo
 ```
 systemd: jalanin `npm start` pakai `Restart=always`, simpen `/data` + `/workspaces` di volume.
 
-**Linux desktop** — sama, dashboard di http://localhost:49374.
+**Linux desktop** — sama, dashboard di http://localhost:49375.
 
 **Android (Termux)**
 ```bash
@@ -331,7 +331,7 @@ npm run dev         # watch bot
 npm run tui         # terminal UI
 ```
 
-Quality gates sebelum release: `typecheck`, `lint`, `test`, `build` harus 0 error, plus smoke test `curl localhost:49374/` & `curl /api/status`.
+Quality gates sebelum release: `typecheck`, `lint`, `test`, `build` harus 0 error, plus smoke test `curl localhost:49375/` & `curl /api/status`.
 
 ---
 

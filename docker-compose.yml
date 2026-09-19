@@ -9,7 +9,7 @@ services:
       - ./data:/app/data
       - ./workspaces:/workspaces
     ports:
-      - "49374:49374"
+      - "49375:49375"
     depends_on:
       - postgres
       - redis

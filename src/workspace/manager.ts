@@ -22,15 +22,16 @@ export interface ProjectProfile {
 
 export function resolveWorkspacePath(nameOrPath: string): string {
   const env = getEnv();
+  const root = (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") ? "./workspaces" : env.WORKSPACE_ROOT;
   if (path.isAbsolute(nameOrPath) && fs.existsSync(nameOrPath)) return path.resolve(nameOrPath);
-  const candidate = path.resolve(env.WORKSPACE_ROOT, nameOrPath);
+  const candidate = path.resolve(root, nameOrPath);
   if (fs.existsSync(candidate)) return candidate;
   // fuzzy: find directory containing the query
   try {
-    const entries = fs.readdirSync(env.WORKSPACE_ROOT, { withFileTypes: true });
+    const entries = fs.readdirSync(root, { withFileTypes: true });
     const q = nameOrPath.toLowerCase();
     const hit = entries.find((e) => e.isDirectory() && e.name.toLowerCase().includes(q));
-    if (hit) return path.join(env.WORKSPACE_ROOT, hit.name);
+    if (hit) return path.join(root, hit.name);
   } catch { /* root may not exist yet */ }
   fs.mkdirSync(candidate, { recursive: true });
   return candidate;
@@ -38,6 +39,8 @@ export function resolveWorkspacePath(nameOrPath: string): string {
 
 export function listWorkspaces(): string[] {
   const env = getEnv();
+  // Never scan filesystem root — that would list /bin, /etc, etc.
+  if (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") return [];
   try {
     return fs.readdirSync(env.WORKSPACE_ROOT, { withFileTypes: true })
       .filter((e) => e.isDirectory())
@@ -113,4 +116,13 @@ export function workspaceTree(workspacePath: string, maxEntries = 200): string[]
   };
   walk(workspacePath, "");
   return out;
+}
+
+/** Ensure workspace root + default dir exist. Call store.ensureWorkspace separately to register in DB. */
+export function ensureWorkspaceDirs(): string {
+  const env = getEnv();
+  const root = (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") ? "./workspaces" : env.WORKSPACE_ROOT;
+  try { fs.mkdirSync(root, { recursive: true }); } catch { /* noop */ }
+  try { fs.mkdirSync(path.join(root, "default"), { recursive: true }); } catch { /* noop */ }
+  return root;
 }
