@@ -2,7 +2,7 @@ import { loadEnv } from "../../../src/config/env.js";
 import { checkHealth } from "../../../src/observability/health.js";
 import { getLogger } from "../../../src/observability/logger.js";
 import { openDatabase } from "../../../src/database/db.js";
-import { createBot } from "../../../src/telegram/gateway.js";
+import { createBot, registerWebhookBot } from "../../../src/telegram/gateway.js";
 import { applyBotMenu } from "../../../src/telegram/commands.js";
 import { buildApiServer } from "../../../src/api/server.js";
 import { listenWithFallback } from "../../../src/api/listen.js";
@@ -14,15 +14,8 @@ async function main(): Promise<void> {
   openDatabase();
   // Ensure workspace dirs exist + registered so dashboard/TUI never look empty
   try {
-    const { ensureWorkspaceDirs, listWorkspaces, resolveWorkspacePath } = await import("../../../src/workspace/manager.js");
-    const { store } = await import("../../../src/database/store.js");
-    ensureWorkspaceDirs();
-    for (const name of listWorkspaces()) {
-      try { store.ensureWorkspace(name, resolveWorkspacePath(name)); } catch { /* noop */ }
-    }
-    if (listWorkspaces().length === 0) {
-      try { store.ensureWorkspace("default", resolveWorkspacePath("default")); } catch { /* noop */ }
-    }
+    const { syncFilesystemWorkspaces } = await import("../../../src/workspace/manager.js");
+    syncFilesystemWorkspaces();
   } catch { /* non-fatal */ }
 
   console.log("TELEAGENT v1.0.0\n");
@@ -43,7 +36,7 @@ async function main(): Promise<void> {
   // internal API (health/metrics/REST/WS/gateway) alongside the bot
   const api = await buildApiServer();
   const port = Number(env.PORT ?? 49375);
-  const actualPort = await listenWithFallback(api, port, "0.0.0.0");
+  const actualPort = await listenWithFallback(api, port, env.HOST);
   log.info({ event: "api.listening", port: actualPort }, "api listening");
   console.log(`\ndashboard:\nhttp://localhost:${actualPort}\n`);
 
@@ -56,7 +49,9 @@ async function main(): Promise<void> {
   const webhookUrl = env.TELEGRAM_WEBHOOK_URL;
   if (webhookUrl) {
     await api.ready();
-    log.info({ event: "bot.webhook", url: webhookUrl }, "webhook mode: set TELEGRAM_WEBHOOK_URL in BotFather to POST /telegram/webhook");
+    await bot.init();
+    registerWebhookBot(bot);
+    log.info({ event: "bot.webhook", url: webhookUrl }, "webhook mode: updates are delivered to POST /telegram/webhook");
     await bot.api.setWebhook(webhookUrl, { secret_token: env.TELEGRAM_WEBHOOK_SECRET || undefined });
   } else {
     log.info({ event: "bot.polling" }, "starting long polling (dev default)");

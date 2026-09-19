@@ -13,8 +13,27 @@ import { runControlsKeyboard, approvalKeyboard, afterRunKeyboard, afterRunKeyboa
 import { truncateForTelegram, splitMessage } from "../utils/large-output.js";
 import { validateUploadSize, validateUploadExt, assertSafeArchiveEntry } from "../security/upload-validation.js";
 import { setupBotCommands } from "./commands.js";
+import { setWebhookHandler } from "./webhook-bus.js";
 
 const log = () => getLogger();
+
+/**
+ * Webhook plumbing. Telegram posts updates to POST /telegram/webhook, so the
+ * API server hands them to the running bot through the webhook bus.
+ * handleUpdate() requires bot.me, so init once and dedupe concurrent first
+ * calls (the first update would otherwise race getMe against itself).
+ */
+let webhookInit: Promise<void> | null = null;
+
+export function registerWebhookBot(bot: Bot): void {
+  webhookInit = null;
+  setWebhookHandler(async (update) => {
+    webhookInit ??= bot.init();
+    await webhookInit;
+    await bot.handleUpdate(update);
+  });
+  getLogger().info({ event: "bot.webhook.registered" }, "bot ready to receive webhook updates");
+}
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
   let delay = 500;

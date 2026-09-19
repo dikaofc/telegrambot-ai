@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://github.com/Graphify-Labs/graphify"><img src="https://img.shields.io/badge/harness-super--power-8a5cf6?style=for-the-badge" alt="harness"/></a>
   <a href="#"><img src="https://img.shields.io/badge/Node-%3E%3D22-3fb950?style=for-the-badge&logo=node.js" alt="node"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-103%20passing-2f81f7?style=for-the-badge" alt="tests"/></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-126%20passing-2f81f7?style=for-the-badge" alt="tests"/></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-8b949e?style=for-the-badge" alt="license"/></a>
 </p>
 
@@ -263,11 +263,14 @@ Agent Orchestrator ──→ Providers (9Router/openai/xAI/Anthropic/ollama/cust
 - `GET /` dashboard • `GET /api/status` (public) • `GET /health /ready /metrics`
 - `GET /api/sessions /api/runs /api/approvals/pending /api/workspaces /api/providers /api/usage /api/audit /api/settings /api/memory`
 - `POST /api/settings` (secret ditolak 403) • `POST /api/approvals/:id` • `POST /api/runs/:id/stop`
-- `POST /api/graphify/build|query|path|explain` • `GET /api/graphify/status`
-- `POST /v1/sessions` • `GET /v1/sessions/:id` • `POST /v1/sessions/:id/messages|stop|pause|resume`
-- `GET /v1/workspaces` • `GET /v1/providers` • `GET /v1/models` • `GET /v1/runs/:id`
-- `WS /v1/ws/sessions/:id` • `POST /v1/chat/completions` (OpenAI-compatible gateway)
-- `POST /telegram/webhook` (production, validasi `x-telegram-bot-api-secret-token`)
+- `POST /api/graphify/build|query|path|explain` • `GET /api/graphify/status|html|report` • `GET /api/diagram`
+- `POST /v1/sessions` • `GET /v1/sessions[/:id]` • `POST /v1/sessions/:id/messages|stop|pause|resume`
+- `GET /v1/workspaces` • `POST /v1/workspaces` • `GET /v1/providers` • `GET /v1/models`
+- `GET /v1/runs/:id` (run + tool calls) • `GET /v1/runs/:id/events`
+- `WS /v1/ws/sessions/:id` (push status tiap 3s) • `POST /v1/chat/completions` (OpenAI-compatible gateway)
+- `POST /telegram/webhook` (production: validasi `x-telegram-bot-api-secret-token` lalu update-nya diteruskan ke bot yang jalan • `503` kalau prosesnya cuma API tanpa bot)
+
+Semua endpoint di atas (kecuali `/`, `/api/status`, `/health`, `/ready`, `/metrics`, `/v1/providers`) butuh `TELEAGENT_API_KEY` kalau diakses dari luar loopback. Tanpa key, akses remote ditolak `401` — dashboard lokal tetap jalan normal.
 
 ---
 
@@ -316,6 +319,8 @@ npm run dev
 | **Secret** | `.env`, `.ssh`, `credentials`, SSH key → `protected` (gak masuk LLM context); audit log `api_key=********` |
 | **Isolation** | per-user `chat → session → workspace → sandbox`, filesystem boundary, `HOME/PATH/WORKSPACE/TEMP` terkontrol, CPU/RAM/pids limit di Docker |
 | **Auth** | `BOT_ACCESS_MODE=owner|private|public|allowlist` + `OWNER_IDS`/`ALLOWED_*` — dicek di tiap handler, bukan cuma Telegram |
+| **API exposure** | `HOST` default `127.0.0.1` — tanpa `TELEAGENT_API_KEY`, semua endpoint mutasi (approval, settings, provider config, stop run) cuma dari localhost |
+| **Workspace boundary** | nama workspace gak bisa kabur: `../..`, path absolut, & symlink keluar `WORKSPACE_ROOT` → ditolak |
 | **Rate & cost** | `messages/min`, `runs/hour`, `tokens/day`, concurrency `MAX_CONCURRENT_RUNS` |
 
 ---
@@ -326,7 +331,7 @@ npm run dev
 npm run typecheck   # tsc --noEmit
 npm run lint        # cek secret hardcode + style
 npm run build       # tsc -> dist/
-npm test            # vitest run  (103 passing)
+npm test            # vitest run  (126 passing)
 npm run dev         # watch bot
 npm run tui         # terminal UI
 ```
@@ -343,7 +348,7 @@ TeleAgent dibikin biar **vibe coder, gen Z, solo dev, sampai tim** bisa ngoding 
 - 🍴 **Fork** + bikin fitur kamu sendiri (plugin `AgentPlugin` gampang banget)
 - 💬 **Share** ke temen yang ngoding dari HP / Termux
 
-Punya ide tool baru? Bikin `src/tools/*.ts` + daftarin di `src/tools/registry.ts` + tulis test di `tests/*.test.ts` — PR auto di-test 103 suite. No gatekeeping, no drama.
+Punya ide tool baru? Bikin `src/tools/*.ts` + daftarin di `src/tools/registry.ts` + tulis test di `tests/*.test.ts` — PR auto di-test 126 suite. No gatekeeping, no drama.
 
 > Built with 💜 for builders yang pengen **ngoding sambil rebahan, tapi harness-nya super power.**
 

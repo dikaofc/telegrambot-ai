@@ -5,6 +5,10 @@ services:
     environment:
       DATABASE_URL: ./data/teleagent.db
       WORKSPACE_ROOT: /workspaces
+      # Containers must bind all interfaces for the published port to work.
+      # Set TELEAGENT_API_KEY in .env too — otherwise the dashboard is
+      # readable/mutable by anything that can reach the published port.
+      HOST: 0.0.0.0
     volumes:
       - ./data:/app/data
       - ./workspaces:/workspaces

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { getEnv } from "../config/env.js";
 import { resolveWorkspacePath, detectProjectProfile } from "../workspace/manager.js";
 import { store } from "../database/store.js";
@@ -132,4 +131,3 @@ export function sessionRunId(sessionId: string): string | undefined {
 }
 
 export function runIdForLookup(runId: string): boolean { return activeRuns.has(runId); }
-void randomUUID;

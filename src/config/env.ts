@@ -39,6 +39,9 @@ const EnvSchema = z.object({
   TELEAGENT_API_KEY: z.string().default(""),
   LOG_LEVEL: z.string().default("info"),
   PORT: z.coerce.number().default(49375),
+  // Listen address. Loopback by default so an unconfigured instance is never
+  // exposed to the network (set 0.0.0.0 in containers / behind a proxy).
+  HOST: z.string().default("127.0.0.1"),
 });
 
 export type AppEnv = z.infer<typeof EnvSchema>;

@@ -2,10 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { SQLInputValue } from "./db.js";
 import { getDb } from "./db.js";
 
-function q(sql: string, params: Record<string, unknown> = {}): void {
-  getDb().prepare(sql).run(...(Object.values(params) as SQLInputValue[]));
-}
-
 function one<T>(sql: string, ...params: SQLInputValue[]): T | undefined {
   return getDb().prepare(sql).get(...params) as T | undefined;
 }
@@ -188,6 +184,11 @@ export const store = {
     const r = one<{ content: string }>("SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1", sessionId as SQLInputValue);
     return r?.content ?? null;
   },
+  getRun(id: string) {
+    return one<{ id: string; session_id: string; input: string; status: string; started_at: string; finished_at: string | null; tokens_input: number; tokens_output: number }>(
+      "SELECT * FROM agent_runs WHERE id = ?", id as SQLInputValue,
+    );
+  },
   lastRunForSession(sessionId: string) {
     return one<{ id: string; input: string; status: string; started_at: string; finished_at: string | null }>(
       "SELECT * FROM agent_runs WHERE session_id = ? ORDER BY started_at DESC LIMIT 1", sessionId as SQLInputValue,
@@ -206,4 +207,3 @@ export const store = {
 };
 
 export type Store = typeof store;
-void q;

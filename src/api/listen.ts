@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getLogger } from "../observability/logger.js";
 
 /** Listen with EADDRINUSE fallback: try port..port+10, return actual port. */
-export async function listenWithFallback(app: FastifyInstance, port: number, host = "0.0.0.0"): Promise<number> {
+export async function listenWithFallback(app: FastifyInstance, port: number, host = "127.0.0.1"): Promise<number> {
   const log = getLogger();
   let lastErr: unknown = null;
   for (let p = port; p < port + 10; p++) {

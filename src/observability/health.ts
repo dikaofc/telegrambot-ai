@@ -12,6 +12,36 @@ export interface HealthStatus {
   detail?: Record<string, string>;
 }
 
+/**
+ * Probing pty spawns a shell, and /api/status is polled every few seconds by
+ * the dashboard, so memoise the result briefly instead of forking a process
+ * per poll. Availability of child_process effectively never changes at runtime.
+ */
+let ptyProbe: { at: number; ok: boolean; detail: string } | null = null;
+const PTY_PROBE_TTL_MS = 30_000;
+
+async function probePty(): Promise<{ ok: boolean; detail: string }> {
+  if (ptyProbe && Date.now() - ptyProbe.at < PTY_PROBE_TTL_MS) return ptyProbe;
+  let result: { ok: boolean; detail: string };
+  try {
+    await import("node:child_process").then((m) => m.execSync("echo pty-ok"));
+    let detail = "child_process ok";
+    try {
+      // @ts-expect-error optional peer: node-pty may not be installed
+      await import("node-pty").then(() => { detail = "node-pty available"; }).catch(() => { detail = "child_process fallback"; });
+    } catch { /* fallback */ }
+    result = { ok: true, detail };
+  } catch (e) {
+    result = { ok: false, detail: String(e) };
+  }
+  ptyProbe = { at: Date.now(), ...result };
+  return result;
+}
+
+export function resetHealthCache(): void {
+  ptyProbe = null;
+}
+
 export async function checkHealth(opts?: { checkProvider?: () => Promise<boolean> }): Promise<HealthStatus> {
   const env = getEnv();
   const detail: Record<string, string> = {};
@@ -42,18 +72,9 @@ export async function checkHealth(opts?: { checkProvider?: () => Promise<boolean
     workspace = false;
     detail.workspace = String(e);
   }
-  let pty = true;
-  try {
-    await import("node:child_process").then((m) => m.execSync("echo pty-ok"));
-    detail.pty = "child_process ok";
-    try {
-      // @ts-expect-error optional peer: node-pty may not be installed
-      await import("node-pty").then(() => { detail.pty = "node-pty available"; }).catch(() => { detail.pty = "child_process fallback"; });
-    } catch { /* fallback */ }
-  } catch (e) {
-    pty = false;
-    detail.pty = String(e);
-  }
+  const probe = await probePty();
+  const pty = probe.ok;
+  detail.pty = probe.detail;
   const sandbox = !env.SANDBOX_ENABLED || workspace;
   detail.sandbox = env.SANDBOX_ENABLED ? `enabled (${env.SANDBOX_RUNTIME})` : "disabled";
   let provider = true;

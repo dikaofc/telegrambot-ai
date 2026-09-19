@@ -5,11 +5,10 @@ import { getLogger } from "../observability/logger.js";
 import { renderPrometheus, metrics } from "../observability/metrics.js";
 import { checkHealth } from "../observability/health.js";
 import { store } from "../database/store.js";
-import { isAuthorized } from "../security/access.js";
 import { listWorkspaces, resolveWorkspacePath, detectProjectProfile } from "../workspace/manager.js";
 import { availableProviders, createProvider } from "../providers/factory.js";
-import { startRun, stopRun, ensureSession, activeRunCount } from "../agent/orchestrator.js";
-import { applyEvent, emptySnapshot, renderStatusMessage } from "../telegram/renderer.js";
+import { startRun, stopRun, pauseRun, resumeRun, ensureSession, activeRunCount, sessionRunId, runIdForLookup } from "../agent/orchestrator.js";
+import { dispatchWebhookUpdate, webhookHandlerReady } from "../telegram/webhook-bus.js";
 import { dashboardPage } from "../dashboard/page.js";
 import { assertNotSecretKey } from "../tools/extended.js";
 
@@ -18,14 +17,27 @@ export async function buildApiServer() {
   const app = Fastify({ logger: false });
   await app.register(websocket);
 
-  const auth = async (req: { headers: Record<string, string | string[] | undefined> }, reply: { code(n: number): { send(x: unknown): void } }): Promise<boolean> => {
-    if (!env.TELEAGENT_API_KEY) return true;
-    const rawAuth = req.headers.authorization;
-    const authStr = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
-    const keyHdr = req.headers["x-api-key"];
-    const key = (Array.isArray(keyHdr) ? keyHdr[0] : keyHdr) ?? authStr?.replace("Bearer ", "");
-    if (key !== env.TELEAGENT_API_KEY) { reply.code(401).send({ error: "unauthorized" }); return false; }
-    return true;
+  const isLoopback = (ip?: string): boolean => {
+    if (!ip) return false;
+    const v = ip.replace(/^::ffff:/i, "");
+    return v === "127.0.0.1" || v === "::1" || v === "localhost";
+  };
+
+  const auth = async (req: { headers: Record<string, string | string[] | undefined>; ip?: string }, reply: { code(n: number): { send(x: unknown): void } }): Promise<boolean> => {
+    if (env.TELEAGENT_API_KEY) {
+      const rawAuth = req.headers.authorization;
+      const authStr = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
+      const keyHdr = req.headers["x-api-key"];
+      const key = (Array.isArray(keyHdr) ? keyHdr[0] : keyHdr) ?? authStr?.replace("Bearer ", "");
+      if (key !== env.TELEAGENT_API_KEY) { reply.code(401).send({ error: "unauthorized" }); return false; }
+      return true;
+    }
+    // No API key configured: trust loopback (local dashboard / dev) only.
+    // Serving approvals & settings to the network unauthenticated would let
+    // anyone approve risky commands or swap provider credentials.
+    if (isLoopback(req.ip)) return true;
+    reply.code(401).send({ error: "unauthorized: set TELEAGENT_API_KEY to allow non-local access" });
+    return false;
   };
 
   app.get("/health", async () => {
@@ -42,30 +54,49 @@ export async function buildApiServer() {
   });
 
   app.get("/v1/providers", async () => ({ providers: availableProviders() }));
-  app.get("/v1/models", async (req) => {
+  app.get("/v1/models", async (req, reply) => {
+    // Hits the upstream provider, so it is gated like other network-touching routes.
+    if (!(await auth(req as never, reply as never))) return;
     const q = (req.query as { provider?: string }).provider ?? env.PROVIDER;
     try { return { provider: q, models: await createProvider(q).models() }; }
     catch (e) { return { provider: q, models: [], error: String(e) }; }
   });
 
   app.get("/v1/workspaces", async () => ({ workspaces: listWorkspaces() }));
-  app.post("/v1/workspaces", async (req) => {
+  app.post("/v1/workspaces", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
     const body = (req.body ?? {}) as { name?: string };
-    const p = resolveWorkspacePath(body.name ?? `ws-${Date.now()}`);
-    return { path: p };
+    try {
+      return { path: resolveWorkspacePath(body.name ?? `ws-${Date.now()}`) };
+    } catch (e) {
+      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(400).send({ error: String(e) });
+      return;
+    }
   });
 
-  app.post("/v1/sessions", async (req) => {
+  app.post("/v1/sessions", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
     const body = (req.body ?? {}) as { userId?: string; chatId?: string; workspace?: string; provider?: string; model?: string };
     const uid = store.upsertUser(String(body.userId ?? "api"), undefined);
     const chat = store.ensureChat(uid, String(body.chatId ?? "api"));
-    const id = ensureSession(uid, chat, body.workspace ?? "default", body.provider ?? env.PROVIDER, body.model ?? env.DEFAULT_MODEL);
-    return { id };
+    try {
+      const id = ensureSession(uid, chat, body.workspace ?? "default", body.provider ?? env.PROVIDER, body.model ?? env.DEFAULT_MODEL);
+      return { id };
+    } catch (e) {
+      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(400).send({ error: String(e) });
+      return;
+    }
   });
-  app.get("/v1/sessions", async () => ({ note: "list via database; single-node keeps latest per chat" }));
-  app.get("/v1/sessions/:id", async (req) => {
+  app.get("/v1/sessions", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const q = (req.query as { limit?: string }).limit;
+    return { sessions: store.listSessions(Math.min(Number(q) || 50, 200)) };
+  });
+  app.get("/v1/sessions/:id", async (req, reply) => {
     const p = req.params as { id: string };
-    return store.getSession(p.id) ?? { error: "not found" };
+    const s = store.getSession(p.id);
+    if (!s) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "not found" }); return; }
+    return s;
   });
   app.post("/v1/sessions/:id/messages", async (req, reply) => {
     if (!(await auth(req as never, reply as never))) return;
@@ -73,28 +104,56 @@ export async function buildApiServer() {
     const body = (req.body ?? {}) as { input?: string; userId?: string };
     const s = store.getSession(p.id) as { user_id: string; chat_id: string; workspace_id: string; provider: string; model: string } | undefined;
     if (!s) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "session not found" }); return; }
-    const wsRow = store.getSession(p.id);
-    void wsRow;
-    const handle = await startRun({
-      userId: s.user_id, chatDbId: s.chat_id, sessionId: p.id,
-      workspacePath: "default", provider: s.provider, model: s.model,
-      input: String(body.input ?? ""),
-    });
-    // drain in background, expose run id immediately
-    void (async () => { for await (const _ of handle.events) { void _; } })();
-    return { runId: handle.runId };
+    // Run in the workspace this session is bound to, not implicitly "default".
+    const wsRow = store.getWorkspaceById(s.workspace_id) as { path: string } | undefined;
+    const workspacePath = wsRow?.path ?? "default";
+    try {
+      const handle = await startRun({
+        userId: s.user_id, chatDbId: s.chat_id, sessionId: p.id,
+        workspacePath, provider: s.provider, model: s.model,
+        input: String(body.input ?? ""),
+      });
+      // drain in background, expose run id immediately
+      void (async () => { for await (const _ of handle.events) { void _; } })();
+      return { runId: handle.runId };
+    } catch (e) {
+      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(409).send({ error: String(e) });
+      return;
+    }
   });
-  app.post("/v1/sessions/:id/stop", async (req) => {
+  app.post("/v1/sessions/:id/stop", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
     const p = req.params as { id: string };
-    const { sessionRunId } = await import("../agent/orchestrator.js");
     const runId = sessionRunId(p.id);
-    if (!runId) return { stopped: false };
-    return { stopped: await stopRun(runId) };
+    if (!runId) return { stopped: false, runId: null };
+    return { stopped: await stopRun(runId), runId };
   });
-  app.post("/v1/sessions/:id/pause", async () => ({ ok: true }));
-  app.post("/v1/sessions/:id/resume", async () => ({ ok: true }));
-  app.get("/v1/runs/:id", async (req) => ({ run: req.params }));
-  app.get("/v1/runs/:id/events", async () => ({ events: [] }));
+  app.post("/v1/sessions/:id/pause", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const runId = sessionRunId((req.params as { id: string }).id);
+    return { paused: runId ? await pauseRun(runId) : false, runId: runId ?? null };
+  });
+  app.post("/v1/sessions/:id/resume", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const runId = sessionRunId((req.params as { id: string }).id);
+    return { resumed: runId ? await resumeRun(runId) : false, runId: runId ?? null };
+  });
+  app.get("/v1/runs/:id", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const { id } = req.params as { id: string };
+    const run = store.getRun(id);
+    if (!run) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "run not found" }); return; }
+    return { run, active: runIdForLookup(id), toolCalls: store.toolCallsForRun(id, 50) };
+  });
+  app.get("/v1/runs/:id/events", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const { id } = req.params as { id: string };
+    const run = store.getRun(id);
+    if (!run) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "run not found" }); return; }
+    // Live event stream is on WS /v1/ws/sessions/:id; here we expose the
+    // durable record of what the run actually did.
+    return { runId: id, status: (run as { status: string }).status, toolCalls: store.toolCallsForRun(id, 100) };
+  });
 
   // ---- dashboard (HTML open; JSON status public; mutations gated by API key) ----
   app.get("/", async (_req, reply) => {
@@ -112,6 +171,17 @@ export async function buildApiServer() {
   });
 
   const gate = async (req: never, reply: never): Promise<boolean> => auth(req as never, reply as never);
+
+  type ReplyLike = { code(n: number): { send(x: unknown): void } };
+  /**
+   * Resolve a workspace for a route. A name that escapes WORKSPACE_ROOT is a
+   * bad request, not a server error, so answer 400 instead of letting the
+   * throw bubble up as a 500.
+   */
+  const wsOr400 = (name: string | undefined, reply: unknown): string | null => {
+    try { return resolveWorkspacePath(name ?? "default"); }
+    catch (e) { (reply as ReplyLike).code(400).send({ error: String(e) }); return null; }
+  };
 
   app.get("/api/sessions", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
@@ -145,9 +215,9 @@ export async function buildApiServer() {
     const names = listWorkspaces();
     return {
       workspaces: names.map((n) => {
-        const p = resolveWorkspacePath(n);
-        let profile = {};
-        try { profile = detectProjectProfile(p); } catch { /* noop */ }
+        let p = n;
+        let profile: Record<string, unknown> = {};
+        try { p = resolveWorkspacePath(n); profile = detectProjectProfile(p); } catch { /* unreadable workspace */ }
         return { name: n, path: p, profile };
       }),
     };
@@ -258,14 +328,18 @@ export async function buildApiServer() {
   app.get("/api/graphify/status", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const q = req.query as { workspace?: string };
+    const ws = wsOr400(q.workspace, reply);
+    if (!ws) return;
     const { graphStatus } = await import("../integrations/graphify.js");
-    return graphStatus(resolveWorkspacePath(q.workspace ?? "default"));
+    return graphStatus(ws);
   });
   app.post("/api/graphify/build", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const body = (req.body ?? {}) as { workspace?: string; updateOnly?: boolean };
+    const ws = wsOr400(body.workspace, reply);
+    if (!ws) return;
     const { buildGraph } = await import("../integrations/graphify.js");
-    return buildGraph(resolveWorkspacePath(body.workspace ?? "default"), Boolean(body.updateOnly));
+    return buildGraph(ws, Boolean(body.updateOnly));
   });
   app.post("/api/graphify/query", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
@@ -274,8 +348,10 @@ export async function buildApiServer() {
       (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(400).send({ error: "question required" });
       return;
     }
+    const ws = wsOr400(body.workspace, reply);
+    if (!ws) return;
     const { queryGraph } = await import("../integrations/graphify.js");
-    return queryGraph(resolveWorkspacePath(body.workspace ?? "default"), body.question);
+    return queryGraph(ws, body.question);
   });
   app.post("/api/graphify/path", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
@@ -284,8 +360,10 @@ export async function buildApiServer() {
       (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(400).send({ error: "from and to required" });
       return;
     }
+    const ws = wsOr400(body.workspace, reply);
+    if (!ws) return;
     const { graphPath } = await import("../integrations/graphify.js");
-    return graphPath(resolveWorkspacePath(body.workspace ?? "default"), body.from, body.to);
+    return graphPath(ws, body.from, body.to);
   });
   app.post("/api/graphify/explain", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
@@ -294,13 +372,15 @@ export async function buildApiServer() {
       (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(400).send({ error: "symbol required" });
       return;
     }
+    const ws = wsOr400(body.workspace, reply);
+    if (!ws) return;
     const { explainNode } = await import("../integrations/graphify.js");
-    return explainNode(resolveWorkspacePath(body.workspace ?? "default"), body.symbol);
+    return explainNode(ws, body.symbol);
   });
   app.get("/api/graphify/html", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
-    const q = (req.query as { workspace?: string }).workspace ?? "default";
-    const wsPath = resolveWorkspacePath(q);
+    const wsPath = wsOr400((req.query as { workspace?: string }).workspace, reply);
+    if (!wsPath) return;
     const { default: fs } = await import("node:fs");
     const { default: path } = await import("node:path");
     const file = path.join(wsPath, "graphify-out", "graph.html");
@@ -313,8 +393,8 @@ export async function buildApiServer() {
   });
   app.get("/api/graphify/report", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
-    const q = (req.query as { workspace?: string }).workspace ?? "default";
-    const wsPath = resolveWorkspacePath(q);
+    const wsPath = wsOr400((req.query as { workspace?: string }).workspace, reply);
+    if (!wsPath) return;
     const { default: fs } = await import("node:fs");
     const { default: path } = await import("node:path");
     const file = path.join(wsPath, "graphify-out", "GRAPH_REPORT.md");
@@ -330,13 +410,12 @@ export async function buildApiServer() {
   app.get("/api/diagram", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const q = (req.query as { workspace?: string }).workspace ?? "default";
-    const wsPath = resolveWorkspacePath(q);
+    const wsPath = wsOr400(q, reply);
+    if (!wsPath) return;
     const { workspaceTree } = await import("../workspace/manager.js");
     const { graphStatus } = await import("../integrations/graphify.js");
     const tree = workspaceTree(wsPath, 120);
     const runs = store.listRuns(undefined, 10) as Array<{ id: string; input: string; status: string; created_at?: string }>;
-    const recentFiles = store.auditList(20).filter((l) => (l as { filesChanged?: string }).filesChanged || (l as { tool?: string }).tool === "write_file" || (l as { tool?: string }).tool === "edit_file").slice(0, 15);
-    // better: get recent tool calls with files
     const toolCalls = store.auditList(30) as Array<{ tool: string; created_at?: string; filesChanged?: string }>;
     let g: Awaited<ReturnType<typeof graphStatus>> | null = null;
     try { g = await graphStatus(wsPath); } catch { g = { available: false, built: false }; }
@@ -362,17 +441,33 @@ export async function buildApiServer() {
     return { workspace: q, wsPath, tree, runs, toolCalls, graphStatus: g, graph, gitStat, generatedAt: new Date().toISOString() };
   });
 
-  app.get("/v1/ws/sessions/:id", { websocket: true }, (socket: unknown) => {
-    const sock = socket as { on(ev: string, cb: (raw: Buffer) => void): void; send(data: string): void };
-    let snap = emptySnapshot();
+  app.get("/v1/ws/sessions/:id", { websocket: true }, (socket: unknown, request: unknown) => {
+    const sock = socket as {
+      on(ev: string, cb: (raw: Buffer) => void): void;
+      send(data: string): void;
+    };
+    const sessionId = (request as { params: { id: string } }).params.id;
     sock.on("message", (raw: Buffer) => {
       try {
         const msg = JSON.parse(String(raw)) as { type: string };
         if (msg.type === "ping") sock.send(JSON.stringify({ type: "pong" }));
-      } catch { /* ignore */ }
+      } catch { /* ignore malformed frames */ }
     });
-    void snap; void applyEvent; void renderStatusMessage;
-    sock.send(JSON.stringify({ type: "ready" }));
+    const sendState = (): void => {
+      const runId = sessionRunId(sessionId);
+      const last = store.lastRunForSession(sessionId) as { id: string; status: string } | undefined;
+      sock.send(JSON.stringify({
+        type: "state", sessionId, active: Boolean(runId), runId: runId ?? null,
+        status: last?.status ?? "idle", at: new Date().toISOString(),
+      }));
+    };
+    sock.send(JSON.stringify({ type: "ready", sessionId }));
+    sendState();
+    // Push state on change (and heartbeat) without the client polling.
+    const timer = setInterval(() => { try { sendState(); } catch { /* socket closed */ } }, 3000);
+    const stop = (): void => clearInterval(timer);
+    sock.on("close", stop);
+    sock.on("error", stop);
   });
 
   // OpenAI-compatible gateway → agent
@@ -402,14 +497,23 @@ export async function buildApiServer() {
     } catch (e) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(500).send({ error: String(e) }); }
   });
 
-  // Telegram webhook (production) with secret-token validation
+  // Telegram webhook (production): validate the secret token, then hand the
+  // update to the running bot. Without this the bot is unreachable in webhook
+  // mode (polling is off), so updates would be silently dropped.
   app.post("/telegram/webhook", async (req, reply) => {
+    const bad = (code: number, error: string): void => { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(code).send({ error }); };
     const secret = (req.headers["x-telegram-bot-api-secret-token"] as string | undefined) ?? "";
-    if (env.TELEGRAM_WEBHOOK_SECRET && secret !== env.TELEGRAM_WEBHOOK_SECRET) {
-      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(401).send({ error: "bad secret" });
+    if (env.TELEGRAM_WEBHOOK_SECRET && secret !== env.TELEGRAM_WEBHOOK_SECRET) { bad(401, "bad secret"); return; }
+    if (!webhookHandlerReady()) { bad(503, "bot not running: webhook mode requires the bot process (npm start)"); return; }
+    const update = req.body as { update_id?: number } | undefined;
+    if (!update || typeof update.update_id !== "number") { bad(400, "invalid telegram update"); return; }
+    try {
+      await dispatchWebhookUpdate(update as Parameters<typeof dispatchWebhookUpdate>[0]);
+    } catch (e) {
+      getLogger().error({ event: "telegram.webhook.failed", err: String(e).slice(0, 300) }, "webhook update failed");
+      bad(500, "update handling failed");
       return;
     }
-    void isAuthorized;
     return { ok: true };
   });
 

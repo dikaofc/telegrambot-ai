@@ -86,11 +86,8 @@ async function main(): Promise<void> {
   openDatabase();
   const env = getEnv();
   try {
-    const { ensureWorkspaceDirs, listWorkspaces, resolveWorkspacePath } = await import("../../../src/workspace/manager.js");
-    ensureWorkspaceDirs();
-    for (const name of listWorkspaces()) {
-      try { store.ensureWorkspace(name, resolveWorkspacePath(name)); } catch { /* noop */ }
-    }
+    const { syncFilesystemWorkspaces } = await import("../../../src/workspace/manager.js");
+    syncFilesystemWorkspaces();
   } catch { /* non-fatal */ }
   // Start dashboard API in background so `npm run tui` also serves the dashboard.
   // If bot/api already runs on the same port, just reuse it (no crash).
@@ -99,7 +96,7 @@ async function main(): Promise<void> {
     const { buildApiServer } = await import("../../../src/api/server.js");
     const { listenWithFallback } = await import("../../../src/api/listen.js");
     const api = await buildApiServer();
-    dashPort = await listenWithFallback(api, env.PORT, "0.0.0.0");
+    dashPort = await listenWithFallback(api, env.PORT, env.HOST);
   } catch (e) {
     console.log(`dashboard: port ${env.PORT} sudah dipakai proses lain — pakai yang sudah jalan (http://localhost:${env.PORT}).`);
   }

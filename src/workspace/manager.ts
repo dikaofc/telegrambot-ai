@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getEnv } from "../config/env.js";
+import { store } from "../database/store.js";
 
 export interface WorkspaceInfo {
   id: string;
@@ -20,14 +21,36 @@ export interface ProjectProfile {
   typecheckCommand?: string;
 }
 
-export function resolveWorkspacePath(nameOrPath: string): string {
+/** Absolute workspace root, never the filesystem root. */
+export function workspaceRoot(): string {
   const env = getEnv();
-  const root = (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") ? "./workspaces" : env.WORKSPACE_ROOT;
-  if (path.isAbsolute(nameOrPath) && fs.existsSync(nameOrPath)) return path.resolve(nameOrPath);
-  // Exact name only — no substring fuzzy matching (it silently resolves to the
-  // wrong workspace, e.g. "telegrambot-ai" matching a junk dir).
-  const candidate = path.resolve(root, nameOrPath);
+  const configured = (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") ? "./workspaces" : env.WORKSPACE_ROOT;
+  return path.resolve(configured);
+}
+
+/**
+ * Resolve a workspace name (or an absolute path) to a directory *inside* the
+ * workspace root. Names are exact — no substring fuzzy matching, which would
+ * silently resolve to the wrong workspace. Anything that escapes the root
+ * ("../..", "/etc", a symlinked-out dir) is rejected, because the workspace
+ * boundary is what isolates one user's files from the rest of the host.
+ */
+export function resolveWorkspacePath(nameOrPath: string): string {
+  const root = workspaceRoot();
+  const raw = String(nameOrPath ?? "").trim();
+  if (!raw) throw new Error("workspace name required");
+  const candidate = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw);
+  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
+    throw new Error(`workspace escape denied: ${raw} is outside ${root}`);
+  }
   fs.mkdirSync(candidate, { recursive: true });
+  // Second pass on real paths so a symlink inside the root cannot point out of it
+  // (compare realpaths, otherwise /var → /private/var breaks macOS).
+  const realRoot = fs.realpathSync(root);
+  const real = fs.realpathSync(candidate);
+  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+    throw new Error(`workspace escape denied: ${raw} resolves outside ${root}`);
+  }
   return candidate;
 }
 
@@ -36,16 +59,16 @@ export function listWorkspaces(): string[] {
   // Never scan filesystem root — that would list /bin, /etc, etc.
   if (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") return [];
   try {
-    return fs.readdirSync(env.WORKSPACE_ROOT, { withFileTypes: true })
+    return fs.readdirSync(workspaceRoot(), { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => e.name);
   } catch { return []; }
 }
 
-export function assertInsideWorkspace(workspaceRoot: string, target: string): string {
-  const resolved = path.resolve(workspaceRoot, target);
-  const root = path.resolve(workspaceRoot) + path.sep;
-  if (!resolved.startsWith(root) && resolved !== path.resolve(workspaceRoot)) {
+export function assertInsideWorkspace(wsPath: string, target: string): string {
+  const resolved = path.resolve(wsPath, target);
+  const base = path.resolve(wsPath);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
     throw new Error(`filesystem boundary violation: ${target}`);
   }
   return resolved;
@@ -114,9 +137,21 @@ export function workspaceTree(workspacePath: string, maxEntries = 200): string[]
 
 /** Ensure workspace root + default dir exist. Call store.ensureWorkspace separately to register in DB. */
 export function ensureWorkspaceDirs(): string {
-  const env = getEnv();
-  const root = (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") ? "./workspaces" : env.WORKSPACE_ROOT;
+  const root = workspaceRoot();
   try { fs.mkdirSync(root, { recursive: true }); } catch { /* noop */ }
   try { fs.mkdirSync(path.join(root, "default"), { recursive: true }); } catch { /* noop */ }
   return root;
+}
+
+/** Register every filesystem workspace in DB so dashboard/TUI never look empty. */
+export function syncFilesystemWorkspaces(userId?: string): string[] {
+  ensureWorkspaceDirs();
+  const done: string[] = [];
+  try {
+    const names = listWorkspaces();
+    for (const name of (names.length ? names : ["default"])) {
+      try { store.ensureWorkspace(name, resolveWorkspacePath(name), userId); done.push(name); } catch { /* noop */ }
+    }
+  } catch { /* non-fatal */ }
+  return done;
 }
