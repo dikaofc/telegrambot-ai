@@ -8,6 +8,7 @@ import { runTest, runBuild, installDeps, detectPackageManager } from "./package-
 import { browserNavigate, browserExtract, hasBrowserWorker } from "./browser.js";
 import { graphStatus, buildGraph, queryGraph, graphPath, explainNode } from "../integrations/graphify.js";
 import * as ext from "./extended.js";
+import * as superTools from "./super.js";
 
 function def(name: string, description: string, schema: Record<string, unknown>, execute: ToolDefinition["execute"]): ToolDefinition {
   return { name, description, schema, execute };
@@ -131,6 +132,24 @@ export function buildRegistry(): Map<string, ToolDefinition> {
   add(def("github_prs", "List open GitHub PRs", { owner: "string", repo: "string" }, async (a) => ext.toolGithubPrs(String(a.owner), String(a.repo))));
   add(def("github_pr_diff", "Fetch a PR diff for review", { owner: "string", repo: "string", number: "number" }, async (a) => ext.toolGithubPrDiff(String(a.owner), String(a.repo), Number(a.number))));
   add(def("coverage_report", "Run project coverage (vitest/c8/pytest-cov/go)", {}, async (_a, c) => ext.toolCoverage(c.workspacePath)));
+  // ---- super harness: 18 elite coding tools ----
+  add(def("code_metrics", "Code metrics: LOC, file count, recent churn (fast heuristic)", {}, async (_a, c) => superTools.toolCodeMetrics(c.workspacePath)));
+  add(def("git_blame", "Git blame for a file (optionally single line)", { target: "string", line: "number?" }, async (a, c) => superTools.toolGitBlame(c.workspacePath, String(a.target), a.line === undefined ? undefined : Number(a.line))));
+  add(def("git_file_history", "Git history for one file (last N commits)", { target: "string", limit: "number?" }, async (a, c) => superTools.toolGitFileHistory(c.workspacePath, String(a.target), a.limit === undefined ? 15 : Number(a.limit))));
+  add(def("dead_code_report", "Dead code / unused export heuristic (ts-prune + grep)", {}, async (_a, c) => superTools.toolDeadCodeReport(c.workspacePath)));
+  add(def("bundle_size", "Bundle/dist size + build tail (quick perf signal)", {}, async (_a, c) => superTools.toolBundleSize(c.workspacePath)));
+  add(def("type_coverage", "Type coverage / tsc file count (typescript health)", {}, async (_a, c) => superTools.toolTypeCoverage(c.workspacePath)));
+  add(def("test_flakiness", "Run tests 3× to detect flakiness", {}, async (_a, c) => superTools.toolTestFlakiness(c.workspacePath)));
+  add(def("perf_benchmark", "Benchmark a shell command with wall time", { command: "string" }, async (a, c) => superTools.toolPerfBenchmark(c.workspacePath, String(a.command))));
+  add(def("security_full_audit", "Full supply-chain audit: npm audit + secret scan + outdated", {}, async (_a, c) => superTools.toolSecurityFullAudit(c.workspacePath)));
+  add(def("docgen", "Docgen: typedoc check + symbol outlines for top src files", {}, async (_a, c) => superTools.toolDocGen(c.workspacePath)));
+  add(def("workspace_snapshot", "Snapshot workspace to tar.gz for rollback/share", { name: "string?" }, async (a, c) => superTools.toolWorkspaceSnapshot(c.workspacePath, a.name === undefined ? undefined : String(a.name))));
+  add(def("pr_create", "Create draft PR via gh CLI (needs gh auth for private)", { title: "string", body: "string?", draft: "boolean?" }, async (a, c) => superTools.toolPrCreate(c.workspacePath, String(a.title), a.body === undefined ? undefined : String(a.body), a.draft === undefined ? true : Boolean(a.draft))));
+  add(def("dependency_update", "Check (and optionally apply) dependency updates via npm-check-updates", { dryRun: "boolean?" }, async (a, c) => superTools.toolDependencyUpdate(c.workspacePath, a.dryRun === undefined ? true : Boolean(a.dryRun))));
+  add(def("call_hierarchy", "Call hierarchy for a symbol: callers + file context", { symbol: "string" }, async (a, c) => superTools.toolCallHierarchy(c.workspacePath, String(a.symbol))));
+  add(def("import_graph", "Import graph of workspace (top 100 imports)", { target: "string?" }, async (a, c) => superTools.toolImportGraph(c.workspacePath, a.target === undefined ? undefined : String(a.target))));
+  add(def("lsp_hover", "LSP-like hover: definition + references + file outline for symbol", { file: "string", symbol: "string" }, async (a, c) => superTools.toolLspHover(c.workspacePath, String(a.file), String(a.symbol))));
+  add(def("full_verify", "Full verify pipeline: format check → lint → typecheck → test → build (one call)", {}, async (_a, c) => superTools.toolFullVerify(c.workspacePath)));
   return m;
 }
 
