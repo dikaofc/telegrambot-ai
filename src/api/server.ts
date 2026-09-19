@@ -194,6 +194,56 @@ export async function buildApiServer() {
     store.setSetting(body.key, String(body.value), body.scope || "global", body.scopeId || "");
     return { ok: true, key: body.key };
   });
+
+  // ---- provider config via dashboard (mirip .env, tapi lewat UI) ----
+  app.get("/api/provider-config", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const env = getEnv();
+    const mask = (s: string) => s ? s.slice(0, 6) + "****" + s.slice(-4) : "";
+    return {
+      provider: env.PROVIDER,
+      baseUrl: env.PROVIDER_BASE_URL,
+      apiKeyMasked: mask(env.PROVIDER_API_KEY),
+      hasKey: Boolean(env.PROVIDER_API_KEY),
+      model: env.PROVIDER_MODEL,
+      defaultModel: env.DEFAULT_MODEL,
+    };
+  });
+  app.post("/api/provider-config", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const body = (req.body ?? {}) as { provider?: string; baseUrl?: string; apiKey?: string; model?: string };
+    const allowedProviders = ["9router", "openai", "xai", "anthropic", "ollama", "custom"];
+    if (body.provider && !allowedProviders.includes(body.provider)) {
+      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(400).send({ error: `provider harus salah satu: ${allowedProviders.join(", ")}` });
+      return;
+    }
+    // Update process.env live (tanpa restart)
+    if (body.provider !== undefined) process.env.PROVIDER = String(body.provider);
+    if (body.baseUrl !== undefined) process.env.PROVIDER_BASE_URL = String(body.baseUrl);
+    if (body.apiKey !== undefined && body.apiKey !== "") process.env.PROVIDER_API_KEY = String(body.apiKey);
+    if (body.model !== undefined) process.env.PROVIDER_MODEL = String(body.model);
+    // Persist to .env file (best-effort)
+    try {
+      const { default: fs } = await import("node:fs");
+      const envPath = ".env";
+      let content = "";
+      try { content = fs.readFileSync(envPath, "utf8"); } catch { content = ""; }
+      const upsert = (key: string, val: string) => {
+        const re = new RegExp(`^${key}=.*$`, "m");
+        const line = `${key}=${val}`;
+        if (re.test(content)) content = content.replace(re, line);
+        else content += (content.endsWith("\n") || content === "" ? "" : "\n") + line + "\n";
+      };
+      if (body.provider !== undefined) upsert("PROVIDER", String(body.provider));
+      if (body.baseUrl !== undefined) upsert("PROVIDER_BASE_URL", String(body.baseUrl));
+      if (body.apiKey !== undefined && body.apiKey !== "") upsert("PROVIDER_API_KEY", String(body.apiKey));
+      if (body.model !== undefined) upsert("PROVIDER_MODEL", String(body.model));
+      fs.writeFileSync(envPath, content, "utf8");
+    } catch (e) {
+      getLogger().warn({ event: "provider-config.persist.failed", err: String(e) }, "could not persist .env");
+    }
+    return { ok: true, provider: process.env.PROVIDER, baseUrl: process.env.PROVIDER_BASE_URL, hasKey: Boolean(process.env.PROVIDER_API_KEY), model: process.env.PROVIDER_MODEL };
+  });
   app.get("/api/memory", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const q = req.query as { scope?: string; scopeId?: string };

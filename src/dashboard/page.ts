@@ -147,10 +147,21 @@ Audit:async v=>{
   +d.logs.map(l=>'<tr><td>'+esc((l.created_at||"").slice(0,19))+'</td><td>'+esc(l.tool||"")+'</td><td>'+esc(l.risk||"")+'</td><td>'+esc(l.approval||"")+'</td><td>'+(l.exit_code??"")+'</td><td>'+(l.duration_ms??"")+'</td></tr>').join("")+'</table></div>';
 },
 Settings:async v=>{
-  const d=await api("/api/settings");
-  v.innerHTML='<div class="panel"><h3>Settings</h3><table><tr><th>key</th><th>scope</th><th>value</th></tr>'
+  const [d, prov] = await Promise.all([api("/api/settings"), api("/api/provider-config")]);
+  v.innerHTML='<div class="panel"><h3>Provider Config — Mirip .env, Lewat Dashboard</h3>'
+  +'<p style="font-weight:700;margin-top:0">Atur provider kayak di .env: PROVIDER, endpoint, API key, model. Disimpen ke .env & langsung aktif tanpa restart.</p>'
+  +'<label>Provider</label><select id="p-provider-sel"><option value="9router">9router</option><option value="openai">openai</option><option value="xai">xai</option><option value="anthropic">anthropic</option><option value="ollama">ollama</option><option value="custom">custom</option></select>'
+  +'<label>Endpoint (PROVIDER_BASE_URL)</label><input id="p-base" placeholder="https://api.openai.com/v1 atau https://9router.../v1">'
+  +'<label>API Key (PROVIDER_API_KEY)</label><input id="p-key" type="password" placeholder="sk-... (kosongkan jika tidak mau ganti)">'
+  +'<label>Model (PROVIDER_MODEL)</label><input id="p-model" placeholder="oc/muse-spark-1.2-contributor-free">'
+  +'<div class="row" style="margin-top:12px"><button class="act" onclick="saveProvider()">SAVE PROVIDER</button><span id="p-save-msg" style="font-weight:800"></span></div>'
+  +'<div style="margin-top:12px;border:3px solid var(--ink);background:#f7f7f5;padding:10px"><b>Saat ini:</b> <code>'+esc(prov.provider)+'</code> • <code>'+esc(prov.baseUrl||"(preset)")+'</code> • key: '+(prov.hasKey?esc(prov.apiKeyMasked):"— belum ada")+' • model: <code>'+esc(prov.model)+'</code></div>'
+  +'</div>'
+  +'<div class="panel"><h3>Settings Lain</h3><table><tr><th>key</th><th>scope</th><th>value</th></tr>'
   +d.settings.map(s=>'<tr><td><code>'+esc(s.key)+'</code></td><td>'+esc(s.scope)+'/'+esc(s.scope_id.slice(0,8))+'</td><td><code>'+esc(String(s.value).slice(0,80))+'</code></td></tr>').join("")+'</table></div>'
-  +'<div class="panel"><h3>Set Value</h3><label>key</label><input id="s-key" placeholder="model"><label>value</label><input id="s-val" placeholder="cph/cehpoint-ai"><label>scope</label><select id="s-scope"><option>global</option><option>session</option><option>workspace</option><option>user</option></select><label>scope id (optional)</label><input id="s-id" placeholder=""><div class="row" style="margin-top:10px"><button class="act" onclick="saveSetting()">SAVE SETTING</button></div><p style="font-weight:700">⚠️ Secrets (API keys) cuma bisa via .env, nggak bisa di sini.</p></div>';
+  +'<div class="panel"><h3>Set Value Manual</h3><label>key</label><input id="s-key" placeholder="model"><label>value</label><input id="s-val" placeholder="cph/cehpoint-ai"><label>scope</label><select id="s-scope"><option>global</option><option>session</option><option>workspace</option><option>user</option></select><label>scope id (optional)</label><input id="s-id" placeholder=""><div class="row" style="margin-top:10px"><button class="act" onclick="saveSetting()">SAVE SETTING</button></div><p style="font-weight:700">Catatan: untuk provider gunakan panel di atas (bisa set API key). Key rahasia lain tetap via .env lebih aman.</p></div>';
+  // prefill
+  setTimeout(()=>{ const sel=$("p-provider-sel"); if(sel) sel.value=prov.provider; const b=$("p-base"); if(b) b.value=prov.baseUrl||""; const m=$("p-model"); if(m) m.value=prov.model||""; },50);
 },
 Graphify:async v=>{
   const ws=(await api("/api/workspaces")).workspaces;
@@ -162,6 +173,16 @@ Graphify:async v=>{
 async function stopRun(id){await api("/api/runs/"+id+"/stop",{method:"POST"});refresh()}
 async function resolveAppr(id,st){await api("/api/approvals/"+id,{method:"POST",body:JSON.stringify({status:st})});refresh()}
 async function saveSetting(){await api("/api/settings",{method:"POST",body:JSON.stringify({key:$("s-key").value,value:$("s-val").value,scope:$("s-scope").value,scopeId:$("s-id").value})});refresh()}
+async function saveProvider(){
+  const msg=$("p-save-msg"); if(msg) msg.textContent="Menyimpan...";
+  try{
+    const body={provider:$("p-provider-sel").value, baseUrl:$("p-base").value, model:$("p-model").value};
+    const key=$("p-key").value; if(key) body.apiKey=key;
+    const r=await api("/api/provider-config",{method:"POST",body:JSON.stringify(body)});
+    if(msg) msg.textContent="Tersimpan — "+r.provider+" / "+(r.model||"auto");
+    setTimeout(refresh,800);
+  }catch(e){ if(msg) msg.textContent="Gagal: "+e.message; }
+}
 async function gStatus(){try{$("g-out").textContent=JSON.stringify(await api("/api/graphify/status?workspace="+encodeURIComponent($("g-ws").value)),null,2)}catch(e){$("g-out").textContent=e.message}}
 async function gBuild(u){$("g-out").textContent="Memproses — bisa beberapa menit";try{$("g-out").textContent=JSON.stringify(await api("/api/graphify/build",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,updateOnly:u})}),null,2)}catch(e){$("g-out").textContent=e.message}}
 async function gQuery(){$("g-qout").textContent="Mencari...";try{$("g-qout").textContent=(await api("/api/graphify/query",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,question:$("g-q").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
