@@ -19,6 +19,16 @@ export function afterRunKeyboard(runId: string): InlineKeyboardButton[][] {
   ];
 }
 
+// Auto: only show relevant buttons — chat (no files) gets no diff/logs
+export function afterRunKeyboardAuto(runId: string, o: { filesChanged: number; hasLogs?: boolean }): InlineKeyboardButton[][] | undefined {
+  const hasChanges = o.filesChanged > 0;
+  const hasLogs = o.hasLogs ?? hasChanges;
+  if (!hasChanges && !hasLogs) return undefined; // pure chat → no buttons (clean)
+  if (hasChanges) return afterRunKeyboard(runId);
+  // edge: no files but has logs (rare) → only Retry + Logs
+  return [[btn("🧾 View Logs", `run:logs:${runId}`), btn("🔁 Retry", `run:retry:${runId}`)]];
+}
+
 export function settingsKeyboard(): InlineKeyboardButton[][] {
   return [
     [btn("🤖 Model", "set:model"), btn("🔌 Provider", "set:provider")],

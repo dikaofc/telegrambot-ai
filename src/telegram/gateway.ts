@@ -9,7 +9,7 @@ import { isDuplicateUpdate, markUpdateProcessed } from "../utils/idempotency.js"
 import { resolveWorkspacePath } from "../workspace/manager.js";
 import { startRun, stopRun, ensureSession, interpretControlMessage, sessionRunId, pauseRun, resumeRun } from "../agent/orchestrator.js";
 import { emptySnapshot, applyEvent, renderStatusMessage, renderFinalSummary, renderFinalSummaryHtml, renderFailure, renderFailureHtml, splitFinalHtml } from "./renderer.js";
-import { runControlsKeyboard, approvalKeyboard, afterRunKeyboard, settingsKeyboard, setupKeyboard } from "./keyboards.js";
+import { runControlsKeyboard, approvalKeyboard, afterRunKeyboard, afterRunKeyboardAuto, settingsKeyboard, setupKeyboard } from "./keyboards.js";
 import { truncateForTelegram, splitMessage } from "../utils/large-output.js";
 import { validateUploadSize, validateUploadExt, assertSafeArchiveEntry } from "../security/upload-validation.js";
 import { setupBotCommands } from "./commands.js";
@@ -347,12 +347,19 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
     const finalHtml = renderFinalSummaryHtml({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
     const htmlChunks = splitFinalHtml(finalHtml);
     const firstChunk = htmlChunks[0] ?? finalHtml;
+    const dedupFiles = [...new Set(filesChanged)];
+    const kb = afterRunKeyboardAuto(sessionId, { filesChanged: dedupFiles.length, hasLogs: attempted.length > 0 });
+    const replyMarkup = kb ? { inline_keyboard: kb } : undefined;
     try {
-      await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, firstChunk, { parse_mode: "HTML", reply_markup: { inline_keyboard: afterRunKeyboard(sessionId) } }));
+      await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, firstChunk, replyMarkup ? { parse_mode: "HTML", reply_markup: replyMarkup } : { parse_mode: "HTML" }));
+      // If no keyboard for pure chat, ensure any old keyboard is removed (edit without markup clears it)
+      if (!replyMarkup) {
+        try { await ctx.api.editMessageReplyMarkup(ctx.chat!.id, statusMsg.message_id, { reply_markup: undefined }); } catch { /* ignore */ }
+      }
     } catch {
-      const fallback = renderFinalSummary({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
+      const fallback = renderFinalSummary({ filesChanged: dedupFiles, durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
       const { text: safe2 } = truncateForTelegram(fallback);
-      await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, safe2, { reply_markup: { inline_keyboard: afterRunKeyboard(sessionId) } }));
+      await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, safe2, replyMarkup ? { reply_markup: replyMarkup } : {}));
     }
     // Remaining chunks (for long AI answers) as separate messages with same HTML mode
     for (let i = 1; i < htmlChunks.length; i++) {
