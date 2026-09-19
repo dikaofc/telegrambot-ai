@@ -19,6 +19,7 @@ const EnvSchema = z.object({
   PROVIDER_BASE_URL: z.string().default(""),
   PROVIDER_API_KEY: z.string().default(""),
   PROVIDER_MODEL: z.string().default("auto"),
+  PROVIDER_MODEL_FALLBACK: z.string().default("cph/cehpoint-ai"),
   AGENT_MAX_RETRIES: z.coerce.number().default(5),
   AGENT_TIMEOUT_MS: z.coerce.number().default(1_800_000),
   WORKSPACE_ROOT: z.string().default("./workspaces"),

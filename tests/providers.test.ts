@@ -39,6 +39,33 @@ describe("provider routing", () => {
     expect(await p.models()).toContain("m");
     server.close();
   });
+  it("falls back to alternate model on same provider before switching provider", async () => {
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => { body += c; });
+      req.on("end", () => {
+        const model = JSON.parse(body).model as string;
+        if (model === "bad") { res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message: "temporarily unavailable" } })); return; }
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "model-fallback-ok" }, finish_reason: "stop" }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    server.listen(0);
+    await once(server, "listening");
+    const port = (server.address() as { port: number }).port;
+    process.env.PROVIDER_BASE_URL = `http://127.0.0.1:${port}`;
+    process.env.PROVIDER_API_KEY = "k";
+    const texts: string[] = [];
+    for await (const e of chatWithFallback(
+      { model: "bad", messages: [{ role: "user", content: "hi" }] },
+      { primary: "custom", fallback: [], allowFallback: true, modelFallback: ["good"] },
+    )) { if (e.type === "text" && e.text) texts.push(e.text); }
+    expect(texts.join("")).toContain("model-fallback-ok");
+    server.close();
+    delete process.env.PROVIDER_BASE_URL;
+  }, 30000);
   it("falls back when primary is unreachable", async () => {
     const good = createServer((req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });

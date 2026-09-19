@@ -1,4 +1,5 @@
 import { createProvider } from "./factory.js";
+import { getEnv } from "../config/env.js";
 import type { ChatRequest, LLMEvent } from "./types.js";
 import { getLogger } from "../observability/logger.js";
 
@@ -6,6 +7,8 @@ export interface RoutingConfig {
   primary: string;
   fallback: string[];
   allowFallback: boolean;
+  /** Same-provider alternate models, tried in order before moving to the next provider. */
+  modelFallback?: string[];
 }
 
 /** Task-classifier → preferred model router with timeout → retry → fallback. */
@@ -24,22 +27,33 @@ export async function* chatWithFallback(request: ChatRequest, routing: RoutingCo
   let lastError: unknown = null;
   for (const providerName of order) {
     const provider = createProvider(providerName);
-    try {
-      yield* provider.chat(request);
-      return;
-    } catch (e) {
-      lastError = e;
-      log.warn({ event: "provider.failed", provider: providerName, err: String(e) }, "provider failed, trying fallback");
-      if (providerName !== order[order.length - 1]) {
-        yield { type: "text", text: `\n\n⚠️ primary provider unavailable, switching to fallback (${providerName} → next)...\n\n` } as LLMEvent;
+    // Primary provider: try requested model, then same-key alternates (covers
+    // flaky upstreams like "temporarily unavailable" without switching keys).
+    const models = providerName === routing.primary
+      ? [request.model, ...(routing.modelFallback ?? [])].filter((m, i, a) => m && a.indexOf(m) === i)
+      : [request.model];
+    for (const m of models) {
+      try {
+        yield* provider.chat({ ...request, model: m });
+        return;
+      } catch (e) {
+        lastError = e;
+        log.warn({ event: "provider.failed", provider: providerName, model: m, err: String(e) }, "provider failed, trying fallback");
       }
+    }
+    if (providerName !== order[order.length - 1]) {
+      yield { type: "text", text: `\n\n⚠️ primary provider unavailable, switching to fallback (${providerName} → next)...\n\n` } as LLMEvent;
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export function defaultRouting(primary: string): RoutingConfig {
-  return { primary, fallback: ["openai", "xai", "ollama"].filter((p) => p !== primary), allowFallback: true };
+  let modelFallback: string[] = [];
+  try {
+    modelFallback = getEnv().PROVIDER_MODEL_FALLBACK.split(",").map((s) => s.trim()).filter(Boolean);
+  } catch { /* env not loaded yet — no model fallback */ }
+  return { primary, fallback: ["openai", "xai", "ollama"].filter((p) => p !== primary), allowFallback: true, modelFallback };
 }
 
 /** Rough cost estimate in USD (marked estimated; unknown models = 0). */
