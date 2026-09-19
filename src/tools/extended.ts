@@ -408,6 +408,337 @@ export async function toolExec(ws: string, command: string, timeoutMs?: number):
   return execCommand(command, { cwd: ws, timeoutMs: timeoutMs ?? 120_000 });
 }
 
+// ---------- pure-JS grep (deterministic, cross-platform: rg/grep differ per OS) ----------
+
+export interface JsGrepOpts { maxHits?: number; maxFiles?: number; ignoreCase?: boolean; exts?: RegExp }
+
+export async function jsGrep(ws: string, pattern: string, opts: JsGrepOpts = {}): Promise<string[]> {
+  const { maxHits = 50, maxFiles = 500, ignoreCase = false, exts } = opts;
+  const re = new RegExp(pattern, ignoreCase ? "i" : "");
+  const hits: string[] = [];
+  let scanned = 0;
+  const stack = [ws];
+  while (stack.length && hits.length < maxHits && scanned < maxFiles) {
+    const dir = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (hits.length >= maxHits || scanned >= maxFiles) break;
+      if (e.name === "node_modules" || e.name === ".git" || e.name === "dist" || e.name === ".worktrees" || e.name === "graphify-out") continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { stack.push(full); continue; }
+      const rel = path.relative(ws, full).replace(/\\/g, "/");
+      if (exts && !exts.test(rel)) continue;
+      let st: fs.Stats;
+      try { st = fs.statSync(full); } catch { continue; }
+      if (!st.isFile() || st.size > 1_000_000) continue;
+      scanned += 1;
+      let text: string;
+      try { text = fs.readFileSync(full, "utf8"); } catch { continue; }
+      if (text.includes("\0")) continue; // binary
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length && hits.length < maxHits; i++) {
+        let m: RegExpExecArray | null;
+        re.lastIndex = 0;
+        try { m = re.exec(lines[i] as string); } catch { return hits; }
+        if (m) hits.push(`${rel}:${i + 1}:${(lines[i] as string).trim().slice(0, 200)}`);
+      }
+    }
+  }
+  return hits;
+}
+
+// ---------- definition / references (offline AST-lite navigation) ----------
+
+const CODE_EXT_RE = /\.(ts|mts|cts|js|mjs|jsx|tsx|py|go|rs|java|kt|rb|php|cs|swift|c|cpp|h|hpp|lua|scala)$/i;
+
+export async function toolFindDefinition(ws: string, symbol: string): Promise<ToolResult> {
+  try {
+    if (!/^[\w$]{2,100}$/.test(symbol)) return fail("invalid symbol");
+    const hits = await jsGrep(ws, `(def|function|class|fn|func|type|interface|struct|enum|trait)\\s+${symbol}\\b`, { exts: CODE_EXT_RE, maxHits: 30 });
+    return ok(hits.length ? hits.join("\n") : `(no definition found for ${symbol} — try find_references)`);
+  } catch (e) { return fail(String(e)); }
+}
+
+export async function toolFindReferences(ws: string, symbol: string): Promise<ToolResult> {
+  try {
+    if (!/^[\w$]{2,100}$/.test(symbol)) return fail("invalid symbol");
+    const hits = await jsGrep(ws, `\\b${symbol}\\b`, { exts: CODE_EXT_RE, maxHits: 50 });
+    return ok(hits.length ? `${hits.length} reference(s):\n` + hits.join("\n") : `(no references to ${symbol})`);
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- scout subagent ----------
+
+export async function toolScout(ws: string, sessionId: string, runId: string, goal: string): Promise<ToolResult> {
+  try {
+    if (!goal || goal.length < 5) return fail("goal required (min 5 chars)");
+    const { scout } = await import("../agent/scout.js");
+    return scout(ws, sessionId, goal.slice(0, 2000), 8, runId);
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- sqlite query (read-only, workspace-bounded) ----------
+
+export async function toolSqliteQuery(ws: string, dbRel: string, sql: string): Promise<ToolResult> {
+  try {
+    if (!/^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(sql)) return fail("only read queries allowed (SELECT/WITH/PRAGMA/EXPLAIN)");
+    if (sql.length > 5000) return fail("query too long");
+    const dbPath = assertInsideWorkspace(ws, dbRel);
+    if (!fs.existsSync(dbPath)) return fail(`database not found: ${dbRel}`);
+    const loader = (process as unknown as { getBuiltinModule(id: string): { DatabaseSync: new (p: string, o?: object) => { prepare(s: string): { all(...a: unknown[]): Array<Record<string, unknown>> }; close(): void } } }).getBuiltinModule("node:sqlite");
+    const db = new loader.DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const rows = db.prepare(sql).all().slice(0, 100);
+      return ok(JSON.stringify(rows, null, 2).slice(0, 20_000) || "(0 rows)");
+    } finally { try { db.close(); } catch { /* noop */ } }
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- api check ----------
+
+export async function toolApiCheck(url: string, method = "GET", body?: string): Promise<ToolResult> {
+  const t0 = Date.now();
+  try {
+    const { assertSafeUrl } = await import("../security/ssrf.js");
+    assertSafeUrl(url);
+    const m = method.toUpperCase();
+    if (!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].includes(m)) return fail("invalid method");
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20_000);
+    try {
+      const res = await fetch(url, {
+        method: m, signal: ctrl.signal,
+        headers: { "user-agent": "teleagent/1.0", "content-type": "application/json" },
+        body: ["POST", "PUT", "PATCH"].includes(m) ? (body ?? "") : undefined,
+      });
+      const text = await res.text();
+      const headers: Record<string, string> = {};
+      res.headers.forEach((v, k) => { if (["content-type", "x-request-id", "retry-after", "x-ratelimit-remaining"].includes(k)) headers[k] = v; });
+      return ok(JSON.stringify({ status: res.status, ms: Date.now() - t0, bytes: text.length, headers, body: text.slice(0, 4000) }, null, 2));
+    } finally { clearTimeout(t); }
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- secret scan (values redacted) ----------
+
+// dash placed first/last in classes so no locale treats it as a range end
+const SECRET_SCAN_RE = "(api[-_]?key|passwd|password|secret|token)\\s*[:=]\\s*['\"]?[^'\"\\s]+|sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|xox[bpas]-[A-Za-z0-9-]+|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----";
+
+function redactLine(line: string): string {
+  return line.replace(/sk-[A-Za-z0-9_-]{10,}/g, "sk-****")
+    .replace(/ghp_[A-Za-z0-9]+/g, "ghp_****")
+    .replace(/xox[bpas]-[A-Za-z0-9-]+/g, "xox****")
+    .replace(/AKIA[0-9A-Z]{16}/g, "AKIA****")
+    .replace(/([:=]\s*['"]?)[^'"\s]{4,}(['"]?)/g, "$1****$2");
+}
+
+export async function toolSecretScan(ws: string): Promise<ToolResult> {
+  try {
+    let lines: string[] = [];
+    const r = await execArgs("git", ["grep", "-n", "-E", "-i", SECRET_SCAN_RE, "--", "."], ws, 60_000);
+    if (r.success) {
+      lines = (r.output ?? "").split("\n").filter(Boolean);
+    } else {
+      const g = await execArgs("grep", ["-rn", "-E", "-i", "-e", SECRET_SCAN_RE, ".", "--exclude-dir=node_modules", "--exclude-dir=.git", "--exclude-dir=dist"], ws, 60_000);
+      if (g.success) {
+        lines = (g.output ?? "").split("\n").filter(Boolean);
+      } else {
+        // system grep missing/broken (Windows, odd locales) → pure-JS fallback
+        lines = await jsGrep(ws, SECRET_SCAN_RE, { ignoreCase: true, maxHits: 100 });
+      }
+    }
+    // ignore our own docs/tests that mention patterns innocuously? No — report all, redacted.
+    const shown = lines.slice(0, 30).map(redactLine);
+    if (lines.length === 0) return ok("✅ no secrets detected");
+    return ok(`⚠️ ${lines.length} possible secret(s) — rotate + remove from history:\n` + shown.join("\n").slice(0, 6000));
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- outdated deps ----------
+
+export async function toolOutdatedDeps(ws: string): Promise<ToolResult> {
+  try {
+    const pathMod = await import("node:path");
+    const fsMod = await import("node:fs");
+    if (fsMod.existsSync(pathMod.join(ws, "package.json"))) {
+      const r = await execCommand("npm outdated --json", { cwd: ws, timeoutMs: 120_000 });
+      const raw = (r.output ?? r.error ?? "{}").slice(0, 6000);
+      try {
+        const j = JSON.parse(raw || "{}") as Record<string, { current?: string; wanted?: string; latest?: string }>;
+        const names = Object.keys(j);
+        if (names.length === 0) return ok("✅ all dependencies up to date");
+        return ok(`${names.length} outdated:\n` + names.slice(0, 20).map((n) => `- ${n}: ${j[n]?.current} → ${j[n]?.latest}`).join("\n"));
+      } catch { return ok(raw.slice(0, 3000)); }
+    }
+    if (fsMod.existsSync(pathMod.join(ws, "requirements.txt"))) {
+      const r = await execArgs("pip", ["list", "--outdated", "--format=json"], ws, 120_000);
+      if (!r.success) return fail("pip outdated check failed");
+      const arr = JSON.parse(r.output || "[]") as Array<{ name: string; version: string; latest_version: string }>;
+      if (arr.length === 0) return ok("✅ all dependencies up to date");
+      return ok(arr.slice(0, 20).map((p) => `- ${p.name}: ${p.version} → ${p.latest_version}`).join("\n"));
+    }
+    return fail("no supported manifest (package.json / requirements.txt)");
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- export session transcript ----------
+
+export async function toolExportSession(ws: string, sessionId: string, outRel: string): Promise<ToolResult> {
+  try {
+    const out = assertInsideWorkspace(ws, outRel || "session-export.md");
+    const msgs = store.messages(sessionId, 500);
+    const md = `# session export (${sessionId.slice(0, 8)})\n\n` + msgs.map((m) => `## ${m.role}\n\n${m.content}\n`).join("\n");
+    fs.writeFileSync(out, md.slice(0, 500_000), "utf8");
+    return ok(`exported ${msgs.length} messages → ${outRel}`, { filesChanged: [outRel] });
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- rename symbol (word-boundary, dry-run default) ----------
+
+export async function toolRenameSymbol(ws: string, oldName: string, newName: string, include?: string, dryRun = true): Promise<ToolResult> {
+  if (!/^[\w$]{2,100}$/.test(oldName) || !/^[\w$]{2,100}$/.test(newName)) return fail("invalid symbol names");
+  const esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return toolSearchReplace(ws, `\\b${esc}\\b`, newName, include ?? "*.{ts,js,py,go,rs}", dryRun);
+}
+
+// ---------- dep add (deterministic installer) ----------
+
+export async function toolDepAdd(ws: string, pkg: string, dev = false): Promise<ToolResult> {
+  try {
+    if (!/^[a-zA-Z0-9@/_+.-]{1,120}$/.test(pkg) || pkg.includes("..")) return fail("invalid package name");
+    const pathMod = await import("node:path");
+    const fsMod = await import("node:fs");
+    if (fsMod.existsSync(pathMod.join(ws, "package.json"))) {
+      const { detectPackageManager } = await import("./package-manager.js");
+      const pm = detectPackageManager(ws);
+      const args: Record<string, string[]> = {
+        npm: dev ? ["install", "--save-dev", pkg] : ["install", pkg],
+        pnpm: dev ? ["add", "-D", pkg] : ["add", pkg],
+        yarn: dev ? ["add", "-D", pkg] : ["add", pkg],
+        bun: dev ? ["add", "-d", pkg] : ["add", pkg],
+      };
+      return execArgs(pm, args[pm] ?? ["install", pkg], ws, 600_000);
+    }
+    if (fsMod.existsSync(pathMod.join(ws, "requirements.txt")) || fsMod.existsSync(pathMod.join(ws, "pyproject.toml"))) {
+      return execArgs("pip", ["install", pkg], ws, 600_000);
+    }
+    if (fsMod.existsSync(pathMod.join(ws, "Cargo.toml"))) return execArgs("cargo", ["add", pkg], ws, 600_000);
+    if (fsMod.existsSync(pathMod.join(ws, "go.mod"))) return execArgs("go", ["get", pkg], ws, 600_000);
+    return fail("no supported manifest for dep_add");
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- shell batch ----------
+
+export async function toolShellBatch(ws: string, commands: string[], stopOnError = true): Promise<ToolResult> {
+  try {
+    if (!Array.isArray(commands) || commands.length === 0 || commands.length > 10) return fail("commands[] required (1-10)");
+    const parts: string[] = [];
+    for (let i = 0; i < commands.length; i++) {
+      const cmd = commands[i] as string;
+      const r = await execCommand(cmd, { cwd: ws, timeoutMs: 300_000 });
+      parts.push(`$ [${i + 1}/${commands.length}] ${cmd}\n${(r.success ? r.output ?? "" : `FAILED: ${r.error ?? ""}`).slice(0, 8000)}`);
+      if (!r.success && stopOnError) {
+        parts.push(`(stopped at step ${i + 1})`);
+        return fail(parts.join("\n\n").slice(0, 20_000));
+      }
+    }
+    return ok(parts.join("\n\n").slice(0, 20_000));
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- repo clone (https/ssh only, no file:// or loopback) ----------
+
+export async function toolRepoClone(ws: string, url: string, dest: string): Promise<ToolResult> {
+  try {
+    if (!/^https:\/\/[^/\s]+\/[^/\s]+/.test(url) && !/^git@[^:\s]+:[^/\s]+\/[^/\s]+/.test(url)) {
+      return fail("only https:// or git@ URLs allowed (no file:// or local paths)");
+    }
+    if (/^https:\/\//.test(url)) {
+      const { assertSafeUrl } = await import("../security/ssrf.js");
+      assertSafeUrl(url); // blocks localhost/private/link-local
+    }
+    const target = assertInsideWorkspace(ws, dest);
+    if (fs.existsSync(target)) return fail(`destination exists: ${dest}`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const r = await execArgs("git", ["clone", "--depth", "1", url, target], ws, 600_000);
+    return r.success ? ok(`cloned → ${dest}\n${(r.output ?? "").slice(0, 1000)}`) : fail((r.error ?? "clone failed").slice(0, 2000));
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- git worktrees (isolated parallel task dirs) ----------
+
+export async function toolWorktreeCreate(ws: string, branch: string): Promise<ToolResult> {
+  try {
+    if (!/^[A-Za-z0-9/_.-]{1,100}$/.test(branch)) return fail("invalid branch name");
+    const dir = path.join(ws, ".worktrees", branch.replace(/\//g, "-"));
+    const rel = path.relative(ws, dir);
+    if (fs.existsSync(dir)) return fail(`worktree dir exists: ${rel}`);
+    fs.mkdirSync(path.join(ws, ".worktrees"), { recursive: true });
+    const exists = await execArgs("git", ["rev-parse", "--verify", branch], ws, 15000);
+    const args = exists.success ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir];
+    const r = await execArgs("git", args, ws, 120_000);
+    return r.success ? ok(`worktree ready: ${rel} @ ${branch}\nAgent can work here without touching the main checkout.`) : fail((r.error ?? "worktree failed").slice(0, 2000));
+  } catch (e) { return fail(String(e)); }
+}
+
+export async function toolWorktreeList(ws: string): Promise<ToolResult> {
+  return execArgs("git", ["worktree", "list", "--porcelain"], ws, 15000);
+}
+
+export async function toolWorktreeRemove(ws: string, dirRel: string, force = false): Promise<ToolResult> {
+  try {
+    const dir = assertInsideWorkspace(ws, dirRel);
+    if (path.resolve(dir) === path.resolve(ws)) return fail("refusing to remove workspace root");
+    const r = await execArgs("git", force ? ["worktree", "remove", "--force", dir] : ["worktree", "remove", dir], ws, 120_000);
+    return r.success ? ok(`worktree removed: ${dirRel}`) : fail((r.error ?? "remove failed — commit or stash changes first, or force=true").slice(0, 2000));
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- github read tools ----------
+
+export async function toolGithubIssues(owner: string, repo: string): Promise<ToolResult> {
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) return fail("invalid owner/repo");
+  const { listIssues } = await import("../integrations/github.js");
+  return listIssues(owner, repo);
+}
+
+export async function toolGithubPrs(owner: string, repo: string): Promise<ToolResult> {
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) return fail("invalid owner/repo");
+  const { listPulls } = await import("../integrations/github.js");
+  return listPulls(owner, repo);
+}
+
+export async function toolGithubPrDiff(owner: string, repo: string, number: number): Promise<ToolResult> {
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo) || !Number.isInteger(number) || number <= 0) {
+    return fail("invalid owner/repo/number");
+  }
+  const { ghPrDiff } = await import("../integrations/github.js");
+  return ghPrDiff(owner, repo, number);
+}
+
+// ---------- coverage ----------
+
+export async function toolCoverage(ws: string): Promise<ToolResult> {
+  const attempts: Array<{ label: string; cmd: string }> = [
+    { label: "vitest", cmd: "npx --yes vitest run --coverage" },
+    { label: "c8", cmd: "npx --yes c8 npm test" },
+    { label: "pytest-cov", cmd: "pytest --cov --cov-report=term-missing -q" },
+    { label: "go-cover", cmd: "go test -cover ./..." },
+  ];
+  const tried: string[] = [];
+  for (const a of attempts) {
+    const r = await execCommand(a.cmd, { cwd: ws, timeoutMs: 600_000 });
+    tried.push(a.label);
+    if (/No test files found|coverage.*not|command not found|No such|ERROR: .*cov|unknown flag/i.test((r.output ?? "") + (r.error ?? ""))) continue;
+    if ((r.output ?? "").trim() || r.success) {
+      return { success: r.success, output: `[${a.label}]\n` + (r.output ?? r.error ?? "").slice(0, 8000), error: r.success ? undefined : (r.error ?? "").slice(0, 2000), metadata: r.metadata };
+    }
+  }
+  return fail(`no coverage runner worked here (tried: ${tried.join(", ")})`);
+}
+
 // ---------- download / archive create ----------
 
 export async function toolDownload(url: string, destRel: string, ws: string, timeoutMs = 120_000): Promise<ToolResult> {

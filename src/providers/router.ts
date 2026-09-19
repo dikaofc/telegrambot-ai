@@ -39,3 +39,19 @@ export async function* chatWithFallback(request: ChatRequest, routing: RoutingCo
 export function defaultRouting(primary: string): RoutingConfig {
   return { primary, fallback: ["openai", "xai", "ollama"].filter((p) => p !== primary), allowFallback: true };
 }
+
+/** Rough cost estimate in USD (marked estimated; unknown models = 0). */
+export function estimateCostUsd(provider: string, _model: string, tokensIn: number, tokensOut: number): number {
+  void _model;
+  const perMillion: Record<string, { in: number; out: number }> = {
+    openai: { in: 0.15, out: 0.6 },
+    anthropic: { in: 3, out: 15 },
+    xai: { in: 2, out: 10 },
+    "9router": { in: 0.5, out: 1.5 },
+    ninerouter: { in: 0.5, out: 1.5 },
+    ollama: { in: 0, out: 0 },
+    custom: { in: 0, out: 0 },
+  };
+  const r = perMillion[provider] ?? { in: 0, out: 0 };
+  return (tokensIn / 1_000_000) * r.in + (tokensOut / 1_000_000) * r.out;
+}

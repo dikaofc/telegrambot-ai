@@ -72,15 +72,23 @@ Telegram → Gateway → Session Manager → Agent Orchestrator → Providers
 | group | tools |
 |---|---|
 | files | `read_file write_file edit_file apply_patch delete_file move_file copy_file list_directory tree read_many file_exists file_info` |
-| search | `glob find_files grep search_code` |
-| shell | `shell shell_start shell_poll shell_input shell_kill` (background sessions for dev servers/watch mode) |
-| git | `git_status git_diff git_log git_show git_branch git_checkout git_commit` |
-| verify | `npm_test npm_build npm_install detect_pm` (deterministic per project) |
+| search + navigate | `glob find_files grep search_code find_definition find_references symbol_outline` |
+| shell | `shell shell_batch shell_start shell_poll shell_input shell_kill` (background sessions for dev servers/watch mode) |
+| git | `git_status git_diff git_log git_show git_branch git_checkout git_commit git_stash git_worktree_create/list/remove` |
+| verify | `npm_test npm_build npm_install detect_pm coverage_report lint_tool typecheck_tool format_code` (deterministic per project) |
 | graph | `graphify_status graphify_build graphify_query graphify_path graphify_explain` |
-| web | `http_get http_post http_download fetch_text web_search` (SSRF-protected; search keyless best-effort) |
-| archives | `archive_extract` (traversal + zip-bomb guarded; Telegram uploads auto-extract) + `zip_create` (.tar.gz/.zip to send results back) |
-| refactor | `search_replace` (dry-run first), `symbol_outline` (offline symbol map), `format_code`, `lint_tool`, `typecheck_tool`, `audit_deps` (npm/pip/cargo vuln audit) |
+| subagent | `scout` (read-only explorer subagent, bounded steps, fresh context) |
+| data | `sqlite_query` (read-only, workspace-bounded), `export_session` |
+| web | `http_get http_post http_download fetch_text web_search api_check` (SSRF-protected; search keyless best-effort) |
+| supply chain | `dep_add audit_deps outdated_deps secret_scan` (leak values redacted) |
+| source | `repo_clone` (https/ssh only), `github_issues/prs/pr_diff` |
 | plan/memory | `todo_write todo_list memory_remember memory_recall project_profile env_info checkpoint_create checkpoint_restore doctor_check quota_status` |
+| system | `process_list process_kill` (+ browser tools when a worker is configured) |
+
+Harness guarantees: auto-checkpoint before the first write of every run,
+per-run token/cost usage recorded (dashboard Usage + `/usage` are live),
+`git --stat` appended to completion summaries, risk re-classification for
+background shell input, read-only scout subagents that can never write.
 | system | `process_list process_kill` (+ browser tools when a worker is configured) |
 
 ## Telegram slash commands (full control — natural language still works)

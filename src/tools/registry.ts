@@ -111,6 +111,26 @@ export function buildRegistry(): Map<string, ToolDefinition> {
   add(def("git_stash", "Stash current changes with a message", { message: "string?" }, async (a, c) => ext.toolGitStash(c.workspacePath, a.message === undefined ? undefined : String(a.message))));
   add(def("doctor_check", "Self-diagnose: telegram/db/provider/sandbox/workspace/pty", {}, async () => ext.toolDoctor()));
   add(def("quota_status", "Token quota + usage for current user", {}, async (_a, c) => ext.toolQuotaStatus(c.userId ?? "")));
+  // ---- harness wave-3: navigation, subagents, data, supply chain ----
+  add(def("find_definition", "Find where a symbol is defined (file:line)", { symbol: "string" }, async (a, c) => ext.toolFindDefinition(c.workspacePath, String(a.symbol))));
+  add(def("find_references", "Find all usages of a symbol (file:line)", { symbol: "string" }, async (a, c) => ext.toolFindReferences(c.workspacePath, String(a.symbol))));
+  add(def("scout", "Send a read-only scout subagent to explore + report (bounded steps)", { goal: "string" }, async (a, c) => ext.toolScout(c.workspacePath, c.sessionId ?? "", c.runId ?? "", String(a.goal ?? ""))));
+  add(def("sqlite_query", "Read-only SQL on a workspace .db (SELECT/WITH/PRAGMA only)", { db: "string", sql: "string" }, async (a, c) => ext.toolSqliteQuery(c.workspacePath, String(a.db), String(a.sql))));
+  add(def("api_check", "Probe an HTTP API: status, latency, headers, body", { url: "string", method: "string?", body: "string?" }, async (a) => ext.toolApiCheck(String(a.url), a.method === undefined ? "GET" : String(a.method), a.body === undefined ? undefined : String(a.body))));
+  add(def("secret_scan", "Scan tracked files for leaked secrets (values redacted)", {}, async (_a, c) => ext.toolSecretScan(c.workspacePath)));
+  add(def("outdated_deps", "List outdated dependencies (npm/pip)", {}, async (_a, c) => ext.toolOutdatedDeps(c.workspacePath)));
+  add(def("export_session", "Export session transcript to a workspace markdown file", { out: "string?" }, async (a, c) => ext.toolExportSession(c.workspacePath, c.sessionId ?? "", String(a.out ?? "session-export.md"))));
+  add(def("rename_symbol", "Word-boundary rename across files (dryRun first!)", { old: "string", new: "string", include: "string?", dryRun: "boolean?" }, async (a, c) => ext.toolRenameSymbol(c.workspacePath, String(a.old), String(a.new), a.include === undefined ? undefined : String(a.include), a.dryRun === undefined ? true : Boolean(a.dryRun))));
+  add(def("dep_add", "Install one dependency with the project package manager", { pkg: "string", dev: "boolean?" }, async (a, c) => ext.toolDepAdd(c.workspacePath, String(a.pkg), Boolean(a.dev))));
+  add(def("shell_batch", "Run up to 10 shell commands in order (optional stop on error)", { commands: "string[]", stopOnError: "boolean?" }, async (a, c) => ext.toolShellBatch(c.workspacePath, Array.isArray(a.commands) ? (a.commands as string[]) : [], a.stopOnError === undefined ? true : Boolean(a.stopOnError))));
+  add(def("repo_clone", "Shallow-clone an https/git repo into the workspace", { url: "string", dest: "string" }, async (a, c) => ext.toolRepoClone(c.workspacePath, String(a.url), String(a.dest))));
+  add(def("git_worktree_create", "Isolated worktree dir for parallel branch work", { branch: "string" }, async (a, c) => ext.toolWorktreeCreate(c.workspacePath, String(a.branch))));
+  add(def("git_worktree_list", "List linked worktrees", {}, async (_a, c) => ext.toolWorktreeList(c.workspacePath)));
+  add(def("git_worktree_remove", "Remove a worktree (commit/stash first, or force)", { dir: "string", force: "boolean?" }, async (a, c) => ext.toolWorktreeRemove(c.workspacePath, String(a.dir), Boolean(a.force))));
+  add(def("github_issues", "List open GitHub issues (needs GITHUB_TOKEN for private repos)", { owner: "string", repo: "string" }, async (a) => ext.toolGithubIssues(String(a.owner), String(a.repo))));
+  add(def("github_prs", "List open GitHub PRs", { owner: "string", repo: "string" }, async (a) => ext.toolGithubPrs(String(a.owner), String(a.repo))));
+  add(def("github_pr_diff", "Fetch a PR diff for review", { owner: "string", repo: "string", number: "number" }, async (a) => ext.toolGithubPrDiff(String(a.owner), String(a.repo), Number(a.number))));
+  add(def("coverage_report", "Run project coverage (vitest/c8/pytest-cov/go)", {}, async (_a, c) => ext.toolCoverage(c.workspacePath)));
   return m;
 }
 

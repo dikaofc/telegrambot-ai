@@ -1,6 +1,6 @@
 import { getEnv } from "../config/env.js";
 import { buildRegistry, toolSchemasForLLM } from "../tools/registry.js";
-import { chatWithFallback, defaultRouting, classifyTask } from "../providers/router.js";
+import { chatWithFallback, defaultRouting, classifyTask, estimateCostUsd } from "../providers/router.js";
 import { toolRisk, policyForRisk, RiskLevel } from "../security/risk.js";
 import { classifyCommand } from "../security/command-parser.js";
 import { hashArgs, auditTool } from "../security/audit.js";
@@ -9,8 +9,23 @@ import { metrics, recordRunDuration } from "../observability/metrics.js";
 import { loadSkillPrompt } from "../agent/skills.js";
 import { buildSystemPrompt } from "../agent/prompts.js";
 import { runVerification } from "../agent/verification.js";
+import { createCheckpoint } from "../agent/checkpoint.js";
+import { gitTools } from "../tools/git.js";
 import type { AgentContext, AgentEvent, AgentRuntime } from "./types.js";
 import type { ChatMessage } from "../providers/types.js";
+
+const WRITE_TOOLS = new Set([
+  "write_file", "edit_file", "apply_patch", "delete_file", "move_file",
+  "git_branch", "git_checkout", "search_replace", "rename_symbol",
+  "shell", "shell_start", "shell_batch",
+]);
+
+function isWriteCall(name: string, args: Record<string, unknown>): boolean {
+  if (!WRITE_TOOLS.has(name)) return false;
+  // search_replace/rename_symbol default to dry-run → only real writes checkpoint
+  if (name === "search_replace" || name === "rename_symbol") return args.dryRun === false;
+  return true;
+}
 
 /**
  * NativeRuntime — the autonomous agent loop:
@@ -73,6 +88,30 @@ export class NativeRuntime implements AgentRuntime {
     let done = false;
     let iterations = 0;
     const maxIterations = 25;
+    let checkpointId: string | null = null;
+
+    const recordUsage = (status: string): void => {
+      try {
+        store.finishRun(this.ctx.runId, status, tokensIn, tokensOut);
+        store.addUsage(this.ctx.userId, this.ctx.runId, this.ctx.provider, this.ctx.model, tokensIn, tokensOut,
+          estimateCostUsd(this.ctx.provider, this.ctx.model, tokensIn, tokensOut));
+      } catch { /* usage must never break the run */ }
+    };
+    const gitStat = async (): Promise<string> => {
+      try {
+        const r = await gitTools.diff(this.ctx.workspacePath, ["--stat"]);
+        const s = (r.output ?? "").trim();
+        return s ? `\n\ngit:\n${s.slice(0, 1500)}` : "";
+      } catch { return ""; }
+    };
+    const ensureCheckpoint = async (): Promise<void> => {
+      if (checkpointId) return;
+      try {
+        const s = store.getSession(this.ctx.sessionId) as { workspace_id: string } | undefined;
+        const wsId = s?.workspace_id ?? store.ensureWorkspace("default", this.ctx.workspacePath, this.ctx.userId);
+        checkpointId = await createCheckpoint(this.ctx.runId, wsId, this.ctx.workspacePath);
+      } catch { /* best-effort safety net */ }
+    };
 
     while (!done && iterations < maxIterations && !this.aborted) {
       iterations += 1;
@@ -96,7 +135,7 @@ export class NativeRuntime implements AgentRuntime {
         yield { type: "error", error: `provider error: ${String(e).slice(0, 1000)}` };
         // deterministic fallback: do something useful without LLM (grep + read)
         yield* this.deterministicProbe(input, filesChanged);
-        store.finishRun(this.ctx.runId, "completed", tokensIn, tokensOut);
+        recordUsage("completed");
         metrics.agentRunsSuccess.inc();
         recordRunDuration(Date.now() - started);
         yield { type: "state", state: "completed" };
@@ -112,8 +151,8 @@ export class NativeRuntime implements AgentRuntime {
         const summary = textBuf.trim() || "Task analyzed. No tool actions were required.";
         metrics.agentRunsSuccess.inc();
         recordRunDuration(Date.now() - started);
-        store.finishRun(this.ctx.runId, "completed", tokensIn, tokensOut);
-        yield { type: "completed", summary, filesChanged };
+        recordUsage("completed");
+        yield { type: "completed", summary: summary + (await gitStat()), filesChanged };
         done = true;
         break;
       }
@@ -166,7 +205,8 @@ export class NativeRuntime implements AgentRuntime {
       yield { type: "state", state: stateForTool };
       yield { type: "tool_start", tool: pendingTool.name, args: pendingTool.args };
 
-      // REAL execution happens here
+      // REAL execution happens here (auto-checkpoint before first write)
+      if (isWriteCall(pendingTool.name, pendingTool.args)) await ensureCheckpoint();
       let result;
       try {
         result = await toolDef.execute(pendingTool.args, {
@@ -204,7 +244,7 @@ export class NativeRuntime implements AgentRuntime {
     }
 
     if (this.aborted && !done) {
-      store.finishRun(this.ctx.runId, "cancelled", tokensIn, tokensOut);
+      recordUsage("cancelled");
       yield { type: "state", state: "cancelled" };
       yield { type: "error", error: "run cancelled by user" };
       return;
@@ -213,11 +253,11 @@ export class NativeRuntime implements AgentRuntime {
     if (!done) {
       // iteration budget exhausted → automatic verification pass then close
       yield* this.finalVerification(filesChanged);
-      store.finishRun(this.ctx.runId, "completed", tokensIn, tokensOut);
+      recordUsage("completed");
       metrics.agentRunsSuccess.inc();
       recordRunDuration(Date.now() - started);
       yield { type: "state", state: "completed" };
-      yield { type: "completed", summary: `Finished after ${iterations} tool steps. Files changed: ${filesChanged.length}.`, filesChanged };
+      yield { type: "completed", summary: `Finished after ${iterations} tool steps. Files changed: ${filesChanged.length}.${checkpointId ? ` Checkpoint: ${checkpointId.slice(0, 8)}.` : ""}` + (await gitStat()), filesChanged };
     }
   }
 
