@@ -82,14 +82,15 @@ export function renderStatusMessage(snap: StatusSnapshot): string {
 }
 
 export function renderFinalSummary(o: { filesChanged: string[]; testsPassed?: number; durationMs: number; tokens: number; model: string; verification?: string; summary?: string }): string {
-  // Plain fallback (used if HTML fails) — keep for editMessageText fallback
+  // Plain fallback — no model, only time+tokens, still cool via blockquote-like lines
   const mins = Math.floor(o.durationMs / 60000);
   const secs = Math.floor((o.durationMs % 60000) / 1000);
   const summaryBlock = o.summary?.trim() ? o.summary.trim().slice(0, 3500) : undefined;
+  const metaPlain = `> ⏱ ${mins}m ${secs}s • 🔢 ${(o.tokens / 1000).toFixed(1)}k tokens`;
   if (summaryBlock && o.filesChanged.length === 0) {
-    return [summaryBlock, "", "---", `model: ${o.model} · ${mins}m ${secs}s · ${(o.tokens / 1000).toFixed(1)}k tokens`, o.verification ? "" : undefined, o.verification].filter((l) => l !== undefined).join("\n");
+    return [summaryBlock, "", metaPlain, o.verification ? "" : undefined, o.verification].filter((l) => l !== undefined).join("\n");
   }
-  return [summaryBlock ? summaryBlock : undefined, summaryBlock ? "" : undefined, summaryBlock ? "---" : undefined, summaryBlock ? "" : undefined, "✅ task completed", "", `model: ${o.model}`, `duration: ${mins}m ${secs}s`, `tokens: ${(o.tokens / 1000).toFixed(1)}k`, `files changed: ${o.filesChanged.length}`, o.filesChanged.length ? o.filesChanged.slice(0, 15).map((f) => `- ${f}`).join("\n") : undefined, o.verification ? "" : undefined, o.verification].filter((l) => l !== undefined).join("\n");
+  return [summaryBlock ? summaryBlock : undefined, summaryBlock ? "" : undefined, "✅ task completed", "", `files changed: ${o.filesChanged.length}`, o.filesChanged.length ? o.filesChanged.slice(0, 15).map((f) => `- ${f}`).join("\n") : undefined, o.verification ? "" : undefined, o.verification, "", metaPlain].filter((l) => l !== undefined).join("\n");
 }
 
 export function renderFinalSummaryHtml(o: { filesChanged: string[]; testsPassed?: number; durationMs: number; tokens: number; model: string; verification?: string; summary?: string }): string {
@@ -97,10 +98,11 @@ export function renderFinalSummaryHtml(o: { filesChanged: string[]; testsPassed?
   const secs = Math.floor((o.durationMs % 60000) / 1000);
   const rawSummary = o.summary?.trim() ? o.summary.trim().slice(0, 8000) : undefined;
   const summaryHtml = rawSummary ? wrapBlockquoteIfNeeded(mdToHtml(rawSummary)) : undefined;
-  const meta = `<i>model: ${o.model} · ${mins}m ${secs}s · ${(o.tokens / 1000).toFixed(1)}k tokens</i>`;
+  // Keren: cukup time + tokens, bungkus blockquote (model tidak ditampilkan di chat sesuai request)
+  const meta = `<blockquote>⏱ <i>${mins}m ${secs}s</i>  •  🔢 <i>${(o.tokens / 1000).toFixed(1)}k tokens</i></blockquote>`;
   const verificationHtml = o.verification ? mdToHtml(o.verification) : undefined;
   if (summaryHtml && o.filesChanged.length === 0) {
-    return [summaryHtml, "", meta, verificationHtml ? "" : undefined, verificationHtml].filter((l) => l !== undefined).join("\n");
+    return [summaryHtml, "", meta, verificationHtml ? "" : undefined, verificationHtml ? `<blockquote>${verificationHtml}</blockquote>` : undefined].filter((l) => l !== undefined).join("\n");
   }
   const filesHtml = o.filesChanged.length ? o.filesChanged.slice(0, 15).map((f) => `• <code>${f.replace(/</g, "&lt;")}</code>`).join("\n") : undefined;
   return [
@@ -108,12 +110,10 @@ export function renderFinalSummaryHtml(o: { filesChanged: string[]; testsPassed?
     summaryHtml ? "" : undefined,
     "<b>✅ task completed</b>",
     "",
-    `<i>model:</i> <code>${o.model}</code>`,
-    `<i>duration:</i> ${mins}m ${secs}s  <i>tokens:</i> ${(o.tokens / 1000).toFixed(1)}k`,
     `<i>files changed:</i> ${o.filesChanged.length}`,
     filesHtml ? filesHtml : undefined,
     verificationHtml ? "" : undefined,
-    verificationHtml,
+    verificationHtml ? `<blockquote>${verificationHtml}</blockquote>` : undefined,
     "",
     meta,
   ].filter((l) => l !== undefined).join("\n");
