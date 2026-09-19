@@ -12,7 +12,7 @@ process.env.OWNER_IDS = "";
 import { buildApiServer } from "../src/api/server.js";
 import { openDatabase } from "../src/database/db.js";
 import { store } from "../src/database/store.js";
-import { dashboardPage } from "../src/dashboard/page.js";
+import { dashboardPage, DASHBOARD_TABS, routeForTab } from "../src/dashboard/page.js";
 
 describe("dashboard", () => {
   it("serves HTML shell with all tabs", () => {
@@ -31,6 +31,22 @@ describe("dashboard", () => {
     expect(root.statusCode).toBe(200);
     expect(root.headers["content-type"]).toContain("text/html");
     expect(root.body).toContain("TeleAgent");
+
+    // every tab is addressable and identifies itself, so refresh/deep-link works
+    for (const tab of DASHBOARD_TABS) {
+      const r = await app.inject({ method: "GET", url: routeForTab(tab) });
+      expect(r.statusCode, `${tab} route`).toBe(200);
+      expect(r.headers["content-type"]).toContain("text/html");
+      expect(r.body, `${tab} page`).toContain(`data-active-tab="${tab}"`);
+    }
+
+    // HTML navigations to unknown paths fall back to the shell; JSON stays honest
+    const spa = await app.inject({ method: "GET", url: "/some/deep/link", headers: { accept: "text/html" } });
+    expect(spa.statusCode).toBe(200);
+    expect(spa.body).toContain("data-active-tab=\"Status\"");
+    const api404 = await app.inject({ method: "GET", url: "/api/nope", headers: { accept: "application/json" } });
+    expect(api404.statusCode).toBe(404);
+    expect(api404.headers["content-type"]).toContain("application/json");
 
     const status = await app.inject({ method: "GET", url: "/api/status" });
     expect(status.statusCode).toBe(200);

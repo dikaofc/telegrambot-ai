@@ -10,7 +10,7 @@ import { availableProviders, createProvider } from "../providers/factory.js";
 import { startRun, stopRun, pauseRun, resumeRun, ensureSession, activeRunCount, sessionRunId, runIdForLookup } from "../agent/orchestrator.js";
 import { dispatchWebhookUpdate, webhookHandlerReady } from "../telegram/webhook-bus.js";
 import { readPlanForRun, renderPlanText } from "../agent/planner.js";
-import { dashboardPage } from "../dashboard/page.js";
+import { dashboardPage, DASHBOARD_TABS, routeForTab, tabFromPath } from "../dashboard/page.js";
 import { assertNotSecretKey } from "../tools/extended.js";
 
 export async function buildApiServer() {
@@ -157,9 +157,23 @@ export async function buildApiServer() {
   });
 
   // ---- dashboard (HTML open; JSON status public; mutations gated by API key) ----
-  app.get("/", async (_req, reply) => {
+  type HtmlReply = { type(t: string): { send(x: string): void } };
+  const serveDashboard = (reply: unknown, activeTab?: string): void => {
+    (reply as HtmlReply).type("text/html").send(dashboardPage({ activeTab }));
+  };
+  // One real route per tab: deep links, refreshes and back/forward all work.
+  for (const tab of DASHBOARD_TABS) {
+    app.get(routeForTab(tab), async (_req, reply) => { serveDashboard(reply, tab); });
+  }
+  app.get("/logo.svg", async (_req, reply) => {
+    const { LOGO_SVG } = await import("../dashboard/logo.js");
     void reply;
-    return (reply as unknown as { type(t: string): { send(x: string): void } }).type("text/html").send(dashboardPage());
+    return (reply as unknown as { type(t: string): { send(x: string): void } }).type("image/svg+xml").send(LOGO_SVG);
+  });
+  app.get("/favicon.ico", async (_req, reply) => {
+    const { LOGO_SVG } = await import("../dashboard/logo.js");
+    void reply;
+    return (reply as unknown as { type(t: string): { send(x: string): void } }).type("image/svg+xml").send(LOGO_SVG);
   });
 
   app.get("/api/status", async () => {
@@ -169,6 +183,14 @@ export async function buildApiServer() {
       provider: env.PROVIDER, model: env.DEFAULT_MODEL,
       access: env.BOT_ACCESS_MODE, workspace: env.WORKSPACE_ROOT,
     };
+  });
+
+  // ---- self-diagnostics (PASS/WARN/FAIL per subsystem) ----
+  app.get("/api/doctor", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const { runDoctor, renderDoctorText } = await import("../observability/doctor.js");
+    const report = await runDoctor();
+    return { report, text: renderDoctorText(report) };
   });
 
   // ---- agent plan (real plan of a real run) ----
@@ -401,13 +423,41 @@ export async function buildApiServer() {
     const { explainNode } = await import("../integrations/graphify.js");
     return explainNode(ws, body.symbol);
   });
-  app.get("/api/graphify/html", async (req, reply) => {
+  // First-party viewer shell. It carries no workspace data (the data comes from
+  // the gated /api/graphify/view below), so it stays open like the dashboard
+  // HTML — an iframe navigation cannot send an API key header.
+  app.get("/api/graphify/html", async (_req, reply) => {
+    const { graphifyPage } = await import("../dashboard/graph-page.js");
+    return (reply as unknown as { type(t: string): { send(x: string): void } }).type("text/html").send(graphifyPage());
+  });
+  // Real viewer data: node degree computed from the links, communities + insights
+  // from graphify's own analysis. Gated like every other data route.
+  app.get("/api/graphify/view", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const q = req.query as { workspace?: string; limit?: string };
+    const wsPath = wsOr400(q.workspace, reply);
+    if (!wsPath) return;
+    const limit = Number(q.limit);
+    try {
+      const { graphView } = await import("../integrations/graphify.js");
+      return graphView(wsPath, { limit: Number.isFinite(limit) && limit > 0 ? limit : undefined });
+    } catch (e) {
+      if (e instanceof Error && e.name === "GraphNotBuiltError") {
+        (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: e.message });
+        return;
+      }
+      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(500).send({ error: String(e) });
+      return;
+    }
+  });
+  // The untouched output from the graphify CLI, kept for fidelity.
+  app.get("/api/graphify/raw", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const wsPath = wsOr400((req.query as { workspace?: string }).workspace, reply);
     if (!wsPath) return;
     const { default: fs } = await import("node:fs");
-    const { default: path } = await import("node:path");
-    const file = path.join(wsPath, "graphify-out", "graph.html");
+    const { graphHtmlPath } = await import("../integrations/graphify.js");
+    const file = graphHtmlPath(wsPath);
     if (!fs.existsSync(file)) {
       (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "graph.html belum ada — build dulu" });
       return;
@@ -542,6 +592,19 @@ export async function buildApiServer() {
       return;
     }
     return { ok: true };
+  });
+
+  // Unknown paths: hand HTML navigations to the dashboard shell (the client
+  // router picks the tab from the path), everything else stays an honest JSON 404.
+  app.setNotFoundHandler((req, reply) => {
+    const pathOnly = String(req.url ?? "/").split("?")[0] ?? "/";
+    const reserved = /^\/(api|v1|health|ready|metrics|telegram)(\/|$)/.test(pathOnly);
+    const wantsHtml = String(req.headers.accept ?? "").includes("text/html");
+    if (req.method === "GET" && !reserved && wantsHtml) {
+      serveDashboard(reply, tabFromPath(pathOnly));
+      return;
+    }
+    (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "not found" });
   });
 
   return app;

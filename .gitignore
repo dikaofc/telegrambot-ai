@@ -9,3 +9,4 @@ workspaces/
 coverage/
 tmp/
 *.log
+graphify-out/

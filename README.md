@@ -1,12 +1,16 @@
 <p align="center">
   <a href="https://github.com/Graphify-Labs/graphify"><img src="https://img.shields.io/badge/harness-super--power-8a5cf6?style=for-the-badge" alt="harness"/></a>
   <a href="#"><img src="https://img.shields.io/badge/Node-%3E%3D22-3fb950?style=for-the-badge&logo=node.js" alt="node"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-127%20passing-2f81f7?style=for-the-badge" alt="tests"/></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-158%20passing-2f81f7?style=for-the-badge" alt="tests"/></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-8b949e?style=for-the-badge" alt="license"/></a>
 </p>
 
 <p align="center">
   <img src="./docs/hero.svg" alt="TeleAgent hero" width="960"/>
+</p>
+
+<p align="center">
+  <img src="./docs/logo.svg" alt="TeleAgent logo" width="72"/>
 </p>
 
 <h1 align="center">TeleAgent <span style="color:#8a5cf6">— super-harness coding agent di Telegram</span></h1>
@@ -25,6 +29,29 @@
   <a href="#-tools-70-real">Tools</a> •
   <a href="#-architecture">Arsitektur</a>
 </p>
+
+---
+
+## 🤖 AGENT BOOTSTRAP — baca ini dulu (wajib untuk semua agent)
+
+Repo ini punya **knowledge graph siap-query** — jangan baca file satu per satu.
+
+```
+Project root : /workspaces/telegrambot-ai      (kode asli — kerja di sini)
+Mirror       : workspaces/default/telegrambot-ai -> ../..  (symlink, selalu sinkron)
+Codegraph    : graphify-out/graph.json (root, ~776 nodes) + GRAPH_REPORT.md + graph.html
+Default graph: workspaces/default/graphify-out/ (kecil, jujur — hanya isi workspace default)
+Logo         : docs/logo.svg (juga live di /logo.svg + favicon dashboard)
+```
+
+Workflow wajib sebelum mengubah kode:
+
+1. `graphify_status` (atau `GET /api/graphify/status?workspace=default`) — pastikan graph built.
+2. `graphify_query "apa yang menghubungkan X ke Y?"` / `graphify_path A B` / `graphify_explain Simbol` — temukan file yang relevan.
+3. Baru `read_file` pada file yang ditunjuk graph.
+4. Graph usang setelah refactor besar? `graphify_build` (atau `POST /api/graphify/build`) — offline, tanpa LLM.
+
+> Symlink `workspaces/default/telegrambot-ai` membuat semua perubahan project otomatis terlihat dari workspace `default`. Jangan pernah meng-copy repo ke dalam `workspaces/` — copy-an akan divergen (sudah pernah kejadian).
 
 ---
 
@@ -263,7 +290,7 @@ Agent Orchestrator ──→ Providers (9Router/openai/xAI/Anthropic/ollama/cust
    │                        │
    │                        ▼
    │                   NativeRuntime
-   │                   understand → discover → plan → tools → observe → verify → retry
+   │                   understand → plan → discover → tools → observe → replan → verify → report
    │
    └────→ Tool Executor (70+ tools) → Workspace / Sandbox (PTY, git, graphify)
                                             │
@@ -356,7 +383,7 @@ npm run dev
 npm run typecheck   # tsc --noEmit
 npm run lint        # cek secret hardcode + style
 npm run build       # tsc -> dist/
-npm test            # vitest run  (127 passing)
+npm test            # vitest run  (158 passing)
 npm run dev         # watch bot
 npm run tui         # terminal UI
 ```
@@ -373,7 +400,7 @@ TeleAgent dibikin biar **vibe coder, gen Z, solo dev, sampai tim** bisa ngoding 
 - 🍴 **Fork** + bikin fitur kamu sendiri (plugin `AgentPlugin` gampang banget)
 - 💬 **Share** ke temen yang ngoding dari HP / Termux
 
-Punya ide tool baru? Bikin `src/tools/*.ts` + daftarin di `src/tools/registry.ts` + tulis test di `tests/*.test.ts` — PR auto di-test 127 suite. No gatekeeping, no drama.
+Punya ide tool baru? Bikin `src/tools/*.ts` + daftarin di `src/tools/registry.ts` + tulis test di `tests/*.test.ts` — PR auto di-test 158 suite. No gatekeeping, no drama.
 
 > Built with 💜 for builders yang pengen **ngoding sambil rebahan, tapi harness-nya super power.**
 

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import vm from "node:vm";
-import { dashboardPage } from "../src/dashboard/page.js";
+import { dashboardPage, DASHBOARD_TABS, routeForTab, tabFromPath } from "../src/dashboard/page.js";
 
-const TABS = ["Status", "Diagram", "Sessions", "Runs", "Approvals", "Workspaces", "Providers", "Usage", "Audit", "Settings", "Graphify"];
+const TABS = [...DASHBOARD_TABS];
 
 function extractScript(): string {
   const html = dashboardPage();
@@ -72,14 +72,57 @@ describe("dashboard page never blank", () => {
   it("inline script has valid syntax", () => {
     expect(() => new vm.Script(extractScript())).not.toThrow();
   });
+  it("ships logo + metadata (favicon, description, OG tags)", () => {
+    const html = dashboardPage();
+    expect(html).toContain('href="/logo.svg"');
+    expect(html).toContain('rel="icon"');
+    expect(html).toContain('name="description"');
+    expect(html).toContain('property="og:title"');
+    expect(html).toContain('<img src="/logo.svg"');
+  });
   it("boots: tabs render, status pill updates, Status view fills", async () => {
     const { el } = await bootDashboard();
     const tabs = String(el("tabs").innerHTML);
     for (const t of TABS) expect(tabs).toContain(t);
     expect(String(el("p-status").textContent)).toBe("ok");
     expect(String(el("p-provider").textContent)).toContain("9router");
-    expect(String(el("view").innerHTML)).toContain("Counts");
+    // the real /api/status counts must render as tiles, not be swallowed
+    const view = String(el("view").innerHTML);
+    expect(view).toContain("sessions");
+    expect(view).toContain("users");
+    expect(view).toContain("<b>2</b>");
   }, 15000);
+
+  it("gives every tab its own real path that round-trips", () => {
+    const seen = new Set<string>();
+    for (const tab of DASHBOARD_TABS) {
+      const route = routeForTab(tab);
+      expect(route.startsWith("/"), `${tab} route`).toBe(true);
+      expect(seen.has(route), `${tab} route ${route} is unique`).toBe(false);
+      seen.add(route);
+      expect(tabFromPath(route), `${tab} resolves from ${route}`).toBe(tab);
+      // trailing slash + query string still resolve to the same tab
+      expect(tabFromPath(route === "/" ? "/?tab=Status" : `${route}/`)).toBe(tab);
+      expect(tabFromPath(`/?tab=${tab.toLowerCase()}`)).toBe(tab);
+      expect(dashboardPage({ activeTab: tab })).toContain(`data-active-tab="${tab}"`);
+    }
+    expect(tabFromPath("/definitely-not-a-tab")).toBe("Status");
+  });
+
+  it("is mobile-first and drops the heavy neobrutalist styling", () => {
+    const html = dashboardPage();
+    expect(html).toContain('name="viewport"');
+    expect(html).toContain("@media (max-width:760px)");
+    // tables collapse into labelled cards so nothing scrolls sideways on a phone
+    expect(html).toContain("data-label");
+    expect(html).toContain("td::before{content:attr(data-label)");
+    // soft shadows, not hard offset neobrutalist blocks
+    expect(/box-shadow:\s*\d+px\s+\d+px\s+0\s+(#000|black)/i.test(html)).toBe(false);
+    expect(/border:\s*[3-9]px\s+solid\s+(#000|black)/i.test(html)).toBe(false);
+    // prefers-reduced-motion is respected and no external asset is fetched
+    expect(html).toContain("prefers-reduced-motion");
+    expect(/<link[^>]+href="https?:/.test(html)).toBe(false);
+  });
 
   it("renders the live agent plan in the Diagram view", async () => {
     const { el, sandbox } = await bootDashboard();
