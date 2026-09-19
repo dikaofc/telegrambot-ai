@@ -31,7 +31,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
   throw last;
 }
 
-function parseNaturalSettings(text: string): { key: string; value: string } | null {
+export function parseNaturalSettings(text: string): { key: string; value: string } | null {
   const t = text.toLowerCase();
   let m = /pakai model (\S+)|use model (\S+)|model (\S+) untuk task/i.exec(text);
   const model = m?.[1] ?? m?.[2] ?? m?.[3];
@@ -42,8 +42,17 @@ function parseNaturalSettings(text: string): { key: string; value: string } | nu
   if (/jangan.*push|push.*persetujuan|push.*approval/.test(t)) return { key: "approval:high", value: "ask" };
   if (/owner only|owner-only|jadi owner/.test(t)) return { key: "access", value: "owner" };
   if (/workspace|project|kerjakan project|buka project/.test(t)) {
-    const mm = /(?:project|workspace)\s+([a-zA-Z0-9/_.-]+)/i.exec(text);
-    if (mm?.[1]) return { key: "workspace", value: mm[1] as string };
+    // question/stop words must never become a workspace name ("workspace apa" → chat, not switch)
+    const stop = new Set(["ke", "di", "dari", "yang", "apa", "siapa", "dimana", "gimana", "bagaimana", "untuk", "dan", "atau", "dengan", "pada", "ini", "itu", "saya", "kamu", "adalah", "the", "a", "an", "to", "in", "on", "what", "which", "where"]);
+    const re = /(?:project|workspace)\s+([a-zA-Z0-9/_.-]+)/gi;
+    let m2: RegExpExecArray | null;
+    while ((m2 = re.exec(text)) !== null) {
+      const v = (m2[1] as string).replace(/[?.!,]+$/, "");
+      if (v && !stop.has(v.toLowerCase())) return { key: "workspace", value: v };
+    }
+    // "ganti workspace ke X" — name comes after a stopword
+    const m3 = /(?:project|workspace)\s+[a-zA-Z0-9/_.-]+\s+([a-zA-Z0-9/_.-]+)/i.exec(text);
+    if (m3?.[1] && !stop.has((m3[1] as string).toLowerCase())) return { key: "workspace", value: (m3[1] as string).replace(/[?.!,]+$/, "") };
   }
   return null;
 }
@@ -89,7 +98,7 @@ export function createBot(): Bot {
         const telegramId = String(userId);
         const dbUser = store.upsertUser(telegramId, ctx.from?.username);
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
-        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         const s = store.getSession(sessionId) as { workspace_id: string } | undefined;
         const wsPath = s ? (store.getWorkspaceById(s.workspace_id) as { path: string } | undefined)?.path ?? resolveWorkspacePath("default") : resolveWorkspacePath("default");
         const { gitTools } = await import("../tools/git.js");
@@ -100,7 +109,7 @@ export function createBot(): Bot {
         const telegramId = String(userId);
         const dbUser = store.upsertUser(telegramId, ctx.from?.username);
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
-        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         const last = store.lastRunForSession(sessionId) as { id: string } | undefined;
         if (!last) { await ctx.answerCallbackQuery({ text: "no runs yet" }); return; }
         const calls = store.toolCallsForRun(last.id, 15);
@@ -111,7 +120,7 @@ export function createBot(): Bot {
         const telegramId = String(userId);
         const dbUser = store.upsertUser(telegramId, ctx.from?.username);
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
-        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         const last = store.lastUserMessage(sessionId);
         await ctx.answerCallbackQuery({ text: last ? "retrying" : "nothing to retry" });
         if (last) await runAgentForMessage(ctx as unknown as Context, last);
@@ -133,7 +142,7 @@ export function createBot(): Bot {
         const telegramId = String(userId);
         const dbUser = store.upsertUser(telegramId, ctx.from?.username);
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
-        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         store.updateSession(sessionId, { provider });
         await ctx.answerCallbackQuery({ text: `provider ${provider}` });
         await ctx.editMessageText(`🔌 provider updated → <b>${provider}</b>`, { parse_mode: "HTML" });
@@ -148,7 +157,7 @@ export function createBot(): Bot {
         const telegramId = String(userId);
         const dbUser = store.upsertUser(telegramId, ctx.from?.username);
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
-        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         const mem = store.getMemory("session", sessionId);
         await ctx.reply(`💾 <b>Memory</b> session ini:\n<pre>${JSON.stringify(mem, null, 2).slice(0, 3000).replace(/</g, "&lt;")}</pre>`, { parse_mode: "HTML" });
       } else if (data === "set:notif") {
@@ -191,10 +200,17 @@ export function createBot(): Bot {
       const telegramId = String(userId);
       const dbUser = store.upsertUser(telegramId, ctx.from?.username);
       const chatDb = store.ensureChat(dbUser, String(ctx.chat.id));
-      const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+      const sessionId = ensureSession(dbUser, chatDb, null, null, null);
       if (setting.key === "model") { store.updateSession(sessionId, { model: setting.value }); await ctx.reply(`✅ Model diganti → <code>${setting.value}</code>`); return; }
       if (setting.key === "provider") { store.updateSession(sessionId, { provider: setting.value }); await ctx.reply(`✅ Provider diganti → <code>${setting.value}</code>`); return; }
-      if (setting.key === "workspace") { await ctx.reply(`✅ Workspace pindah → <code>${setting.value}</code>`); return; }
+      if (setting.key === "workspace") {
+        const { switchSessionWorkspace } = await import("./commands.js");
+        try {
+          const sw = switchSessionWorkspace(dbUser, sessionId, setting.value);
+          await ctx.reply(`✅ Workspace pindah → <code>${sw.name}</code> (<code>${sw.path}</code>)`);
+        } catch (e) { await ctx.reply(`❌ ${String(e).slice(0, 200)}`); }
+        return;
+      }
       if (setting.key === "approval:high") { store.setSetting(`approval:high:${sessionId}`, "ask", "session", sessionId); await ctx.reply("✅ Sip, <code>git push</code> sekarang butuh approval dulu"); return; }
       if (setting.key === "access") { await ctx.reply("🔒 Mau ganti akses? Balas <code>confirm owner only</code>"); return; }
     }
@@ -305,11 +321,15 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   const dbUser = store.upsertUser(telegramId, ctx.from?.username);
   const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
 
-  // workspace resolution: explicit "project X" or session default
+  // workspace resolution: explicit "project X" wins, otherwise keep the session's current workspace
   const setting = parseNaturalSettings(text);
-  const workspaceName = setting?.key === "workspace" ? setting.value : "default";
-  const sessionId = ensureSession(dbUser, chatDb, workspaceName, env.PROVIDER, env.DEFAULT_MODEL);
-  const wsPath = resolveWorkspacePath(workspaceName === "default" ? await defaultWorkspace(sessionId) : workspaceName);
+  const explicitWs = setting?.key === "workspace" ? setting.value : null;
+  const sessionId = ensureSession(dbUser, chatDb, explicitWs, null, null);
+  const sess = store.getSession(sessionId) as { provider: string; model: string; workspace_id: string } | undefined;
+  const sessWs = sess ? (store.getWorkspaceById(sess.workspace_id) as { path: string } | undefined)?.path : undefined;
+  const wsPath = sessWs ?? resolveWorkspacePath("default");
+  const runProvider = sess?.provider || env.PROVIDER;
+  const runModel = sess?.model || env.DEFAULT_MODEL;
 
   // live status message (aggregated + debounced edits)
   const statusMsg = await withRetry(() => ctx.reply("✨ Lagi dikerjain — bentar ya..."));
@@ -326,7 +346,7 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   let filesChanged: string[] = [];
   const attempted: string[] = [];
   try {
-    const handle = await startRun({ userId: dbUser, chatDbId: chatDb, sessionId, workspacePath: wsPath, provider: env.PROVIDER, model: env.DEFAULT_MODEL, input: text });
+    const handle = await startRun({ userId: dbUser, chatDbId: chatDb, sessionId, workspacePath: wsPath, provider: runProvider, model: runModel, input: text });
     try { await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, renderStatusMessage(snap), { reply_markup: { inline_keyboard: runControlsKeyboard(handle.runId) } })); } catch { /* noop */ }
     let tokens = 0;
     let lastSummary = "";
@@ -344,7 +364,7 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
     const duration = Date.now() - started;
     if (lastSummary.includes("\n\ngit:\n")) lastSummary = lastSummary.split("\n\ngit:\n")[0].trim();
     // Try HTML first (auto markdown + blockquote), fall back to plain on parse error
-    const finalHtml = renderFinalSummaryHtml({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
+    const finalHtml = renderFinalSummaryHtml({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: runModel, summary: lastSummary || undefined });
     const htmlChunks = splitFinalHtml(finalHtml);
     const firstChunk = htmlChunks[0] ?? finalHtml;
     const dedupFiles = [...new Set(filesChanged)];
@@ -357,7 +377,7 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
         try { await ctx.api.editMessageReplyMarkup(ctx.chat!.id, statusMsg.message_id, { reply_markup: undefined }); } catch { /* ignore */ }
       }
     } catch {
-      const fallback = renderFinalSummary({ filesChanged: dedupFiles, durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
+      const fallback = renderFinalSummary({ filesChanged: dedupFiles, durationMs: duration, tokens, model: runModel, summary: lastSummary || undefined });
       const { text: safe2 } = truncateForTelegram(fallback);
       await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, safe2, replyMarkup ? { reply_markup: replyMarkup } : {}));
     }
@@ -383,12 +403,6 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
     try { await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `⚠️ task incomplete\n\n${msg.slice(0, 500)}`)); } catch { /* noop */ }
     log().error({ event: "telegram.run.failed", err: msg }, "agent run failed");
   }
-}
-
-async function defaultWorkspace(sessionId: string): Promise<string> {
-  const s = store.getSession(sessionId) as { workspace_id?: string } | undefined;
-  void s;
-  return "default";
 }
 
 export { setupKeyboard };

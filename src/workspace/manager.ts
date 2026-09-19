@@ -24,15 +24,9 @@ export function resolveWorkspacePath(nameOrPath: string): string {
   const env = getEnv();
   const root = (!env.WORKSPACE_ROOT || env.WORKSPACE_ROOT === "/") ? "./workspaces" : env.WORKSPACE_ROOT;
   if (path.isAbsolute(nameOrPath) && fs.existsSync(nameOrPath)) return path.resolve(nameOrPath);
+  // Exact name only — no substring fuzzy matching (it silently resolves to the
+  // wrong workspace, e.g. "telegrambot-ai" matching a junk dir).
   const candidate = path.resolve(root, nameOrPath);
-  if (fs.existsSync(candidate)) return candidate;
-  // fuzzy: find directory containing the query
-  try {
-    const entries = fs.readdirSync(root, { withFileTypes: true });
-    const q = nameOrPath.toLowerCase();
-    const hit = entries.find((e) => e.isDirectory() && e.name.toLowerCase().includes(q));
-    if (hit) return path.join(root, hit.name);
-  } catch { /* root may not exist yet */ }
   fs.mkdirSync(candidate, { recursive: true });
   return candidate;
 }

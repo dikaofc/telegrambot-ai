@@ -63,15 +63,26 @@ interface Ctx {
 }
 
 function sessionCtx(ctx: Context): Ctx {
-  const env = getEnv();
   const telegramId = String(ctx.from?.id ?? "");
   const dbUser = store.upsertUser(telegramId, ctx.from?.username);
   const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
-  const sessionId = ensureSession(dbUser, chatDb, "default", env.PROVIDER, env.DEFAULT_MODEL);
+  // nulls = preserve the session's current workspace/provider/model
+  const sessionId = ensureSession(dbUser, chatDb, null, null, null);
   const s = store.getSession(sessionId) as { provider: string; model: string; workspace_id: string };
   const wsRow = store.getWorkspaceById(s.workspace_id) as { path: string } | undefined;
   const wsPath = wsRow?.path ?? resolveWorkspacePath("default");
   return { dbUser, chatDb, sessionId, provider: s.provider, model: s.model, workspaceId: s.workspace_id, wsPath };
+}
+
+/** Shared workspace switch: exact name, persisted to the session. */
+export function switchSessionWorkspace(dbUser: string, sessionId: string, rawName: string): { name: string; path: string } {
+  const name = rawName.trim().split(/\s+/)[0] ?? "";
+  const clean = name.replace(/[^a-zA-Z0-9/_.-]/g, "");
+  if (!clean) throw new Error("nama workspace kosong");
+  const p = resolveWorkspacePath(clean);
+  const wsId = store.ensureWorkspace(clean, p, dbUser);
+  store.updateSession(sessionId, { workspace_id: wsId });
+  return { name: clean, path: p };
 }
 
 function authed(ctx: Context): boolean {
@@ -153,10 +164,10 @@ Ketik aja mau ngapain — langsung jalan`,
     const name = ((ctx.match as string) ?? "").trim();
     if (!name) { await ctx.reply("Pakai: <code>/workspace nama</code>\nSekarang: " + sessionCtx(ctx).wsPath); return; }
     const c = sessionCtx(ctx);
-    const p = resolveWorkspacePath(name);
-    const wsId = store.ensureWorkspace(name, p, c.dbUser);
-    store.updateSession(c.sessionId, { workspace_id: wsId });
-    await ctx.reply(`✅ Workspace pindah → <code>${name}</code> (<code>${p}</code>)`);
+    try {
+      const sw = switchSessionWorkspace(c.dbUser, c.sessionId, name);
+      await ctx.reply(`✅ Workspace pindah → <code>${sw.name}</code> (<code>${sw.path}</code>)`);
+    } catch (e) { await ctx.reply(`❌ ${String(e).slice(0, 200)}`); }
   });
 
   bot.command("new", async (ctx) => {

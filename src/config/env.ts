@@ -33,7 +33,7 @@ const EnvSchema = z.object({
   MAX_EXTRACTED_MB: z.coerce.number().default(500),
   MAX_OUTPUT_MB: z.coerce.number().default(10),
   RATE_LIMIT_MESSAGES: z.coerce.number().default(30),
-  RATE_LIMIT_RUNS: z.coerce.number().default(10),
+  RATE_LIMIT_RUNS: z.coerce.number().default(60),
   MAX_DAILY_TOKENS: z.coerce.number().default(1_000_000),
   TELEAGENT_API_KEY: z.string().default(""),
   LOG_LEVEL: z.string().default("info"),

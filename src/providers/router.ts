@@ -12,6 +12,8 @@ export interface RoutingConfig {
 export function classifyTask(input: string): "coding" | "reasoning" | "chat" {
   const t = input.toLowerCase();
   if (/code|bug|test|build|refactor|implement|fix|deploy|api|database|auth|review|project|file|npm|git|error|crash|leak/.test(t)) return "coding";
+  // shell / filesystem / terminal intent needs tools — never "chat" (chat sends no tools)
+  if (/shell|terminal|perintah|command|ketik|jalankan|eksekusi|execute|\bls\b|\bdir\b|\bcat\b|baca|tulis|tampilkan|list\b|cek isi|lihat isi|isi (folder|file|direktori|workspace)|query|graph/.test(t)) return "coding";
   if (/prove|math|analyze|compare|plan|design|architect/.test(t)) return "reasoning";
   return "chat";
 }

@@ -96,15 +96,27 @@ export async function resumeRun(runId: string): Promise<boolean> {
   return true;
 }
 
-export function ensureSession(userId: string, chatDbId: string, workspaceName: string, provider: string, model: string): string {
-  const wsPath = resolveWorkspacePath(workspaceName || "default");
-  const wsId = store.ensureWorkspace(workspaceName || "default", wsPath, userId);
+/**
+ * Latest session wins. Null fields = preserve existing values (implicit callers
+ * must not clobber /workspace, /model, /provider choices). Non-null = explicit set.
+ */
+export function ensureSession(userId: string, chatDbId: string, workspaceName: string | null, provider: string | null, model: string | null): string {
   const latest = store.latestSessionForChat(chatDbId) as { id: string } | undefined;
   if (latest) {
-    store.updateSession(latest.id, { workspace_id: wsId, provider, model });
+    const patch: Record<string, string> = {};
+    if (workspaceName) {
+      const wsPath = resolveWorkspacePath(workspaceName);
+      patch.workspace_id = store.ensureWorkspace(workspaceName, wsPath, userId);
+    }
+    if (provider) patch.provider = provider;
+    if (model) patch.model = model;
+    if (Object.keys(patch).length > 0) store.updateSession(latest.id, patch);
     return latest.id;
   }
-  return store.createSession({ userId, chatId: chatDbId, workspaceId: wsId, provider, model });
+  const wsName = workspaceName || "default";
+  const wsPath = resolveWorkspacePath(wsName);
+  const wsId = store.ensureWorkspace(wsName, wsPath, userId);
+  return store.createSession({ userId, chatId: chatDbId, workspaceId: wsId, provider: provider ?? "9router", model: model ?? "auto" });
 }
 
 export function interpretControlMessage(text: string): "stop" | "pause" | "resume" | null {
