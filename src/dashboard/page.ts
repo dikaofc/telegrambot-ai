@@ -136,7 +136,7 @@ Diagram:async v=>{
   // also list real workspaces from API
   let wsList = "";
   try{ const wss=await api("/api/workspaces"); wsList=wss.workspaces.map(w=>'<option value="'+esc(w.name)+'"'+(w.name===wsSel?' selected':"")+'>'+esc(w.name)+'</option>').join(""); }catch{}
-  v.innerHTML='<div class="panel"><h3>Live Diagram — Workspace & File Activity</h3><div class="row"><label>Workspace</label><select id="diag-ws" onchange="localStorage.setItem(\'diagram_ws\',this.value);VIEWS.Diagram(document.getElementById(\'view\'))">'+(wsList||wsOpts)+'</select><label style="margin-left:8px"><input type="checkbox" id="diag-auto" checked> Auto refresh (3s)</label><span style="margin-left:auto;font-weight:800">Update: '+new Date(d.generatedAt).toLocaleTimeString()+'</span></div></div>'
+  v.innerHTML='<div class="panel"><h3>Live Diagram — Workspace & File Activity</h3><div class="row"><label>Workspace</label><select id="diag-ws" onchange="localStorage.setItem(\\'diagram_ws\\',this.value);VIEWS.Diagram(document.getElementById(\\'view\\'))">'+(wsList||wsOpts)+'</select><label style="margin-left:8px"><input type="checkbox" id="diag-auto" checked> Auto refresh (3s)</label><span style="margin-left:auto;font-weight:800">Update: '+new Date(d.generatedAt).toLocaleTimeString()+'</span></div></div>'
   +'<div class="grid" style="grid-template-columns:1.2fr 1fr;gap:12px"><div class="panel"><h3>File Tree (live, 120 files)</h3><div style="max-height:380px;overflow:auto">'+treeHtml+'</div></div><div class="panel"><h3>Git Status</h3>'+gitHtml+'</div></div>'
   +'<div class="panel"><h3>Recent Runs (live)</h3><table><tr><th>id</th><th>input</th><th>status</th><th>time</th></tr>'+runsHtml+'</table></div>'
   +svg
