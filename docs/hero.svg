@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#0d1117"/><stop offset="100%" stop-color="#161b22"/>
+  </linearGradient>
+  <linearGradient id="grad" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="#2f81f7"/><stop offset="50%" stop-color="#8a5cf6"/><stop offset="100%" stop-color="#f778ba"/>
+  </linearGradient>
+  <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#21262d"/><stop offset="100%" stop-color="#161b22"/>
+  </linearGradient>
+  <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect width="960" height="420" rx="20" fill="url(#bg)" stroke="#30363d"/>
+<!-- subtle grid -->
+<g opacity="0.06" stroke="#8b949e" stroke-width="0.6">
+  <path d="M0 70 H960 M0 140 H960 M0 210 H960 M0 280 H960 M0 350 H960 M80 0 V420 M200 0 V420 M340 0 V420 M500 0 V420 M640 0 V420 M800 0 V420"/>
+</g>
+
+<!-- top badge -->
+<g transform="translate(32,28)">
+  <rect width="170" height="26" rx="13" fill="#1f6feb" opacity="0.15"/>
+  <rect width="170" height="26" rx="13" fill="none" stroke="#1f6feb" opacity="0.5"/>
+  <circle cx="14" cy="13" r="5" fill="#3fb950"><animate attributeName="opacity" values="1;0.4;1" dur="1.6s" repeatCount="indefinite"/></circle>
+  <text x="26" y="17" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#58a6ff" letter-spacing="0.6">SUPER-HARNESS • LIVE</text>
+</g>
+
+<!-- left: title -->
+<g transform="translate(32,72)">
+  <text font-family="Inter, system-ui, sans-serif" font-size="42" font-weight="900" fill="white" letter-spacing="-1.5">Tele<tspan fill="url(#grad)">Agent</tspan></text>
+  <text y="42" font-family="Inter, system-ui, sans-serif" font-size="13.5" fill="#8b949e">Telegram is the UI. The harness is the superpower.</text>
+  <text y="62" font-family="JetBrains Mono, monospace" font-size="11" fill="#6e7681">70+ tools • scout subagents • knowledge graph • PTY • auto-checkpoint</text>
+  <!-- pill stats -->
+  <g transform="translate(0,82)">
+    <rect width="108" height="28" rx="14" fill="#21262d" stroke="#30363d"/>
+    <text x="14" y="18" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#e6edf3">70+ tools</text>
+    <g transform="translate(120,0)">
+      <rect width="118" height="28" rx="14" fill="#21262d" stroke="#30363d"/>
+      <text x="12" y="18" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#e6edf3">21 /commands</text>
+    </g>
+    <g transform="translate(250,0)">
+      <rect width="132" height="28" rx="14" fill="#21262d" stroke="#30363d"/>
+      <text x="12" y="18" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#e6edf3">dashboard :49374</text>
+    </g>
+  </g>
+</g>
+
+<!-- right: phone mock with typing animation -->
+<g transform="translate(520,64)">
+  <rect width="410" height="300" rx="22" fill="url(#cardGrad)" stroke="#30363d"/>
+  <rect x="12" y="12" width="386" height="38" rx="12" fill="#0d1117" stroke="#21262d"/>
+  <circle cx="32" cy="31" r="7" fill="#3fb950"/><circle cx="50" cy="31" r="7" fill="#d29922"/><circle cx="68" cy="31" r="7" fill="#f85149"/>
+  <text x="200" y="35" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#8b949e">Telegram • TeleAgent</text>
+  <!-- chat bubbles -->
+  <g font-family="Inter, system-ui, sans-serif" font-size="11">
+    <rect x="18" y="64" width="260" height="36" rx="12" fill="#21262d" stroke="#30363d"/>
+    <text x="32" y="86" fill="#e6edf3">siapa kamu? jawab 3 kata</text>
+    <rect x="130" y="112" width="268" height="36" rx="12" fill="#1f6feb"/>
+    <text x="146" y="134" fill="white" font-weight="700">Aku TeleAgent AI ✨</text>
+    <rect x="18" y="160" width="300" height="36" rx="12" fill="#21262d" stroke="#30363d"/>
+    <text x="32" y="182" fill="#e6edf3">bikin auth yang aman + test</text>
+    <g>
+      <rect x="130" y="208" width="268" height="60" rx="12" fill="#1f6feb"/>
+      <text x="146" y="228" fill="white" font-weight="600">🧠 planning → 🔎 scout</text>
+      <text x="146" y="244" fill="white" opacity="0.9">🛠 editing → ▶️ testing</text>
+      <text x="146" y="260" fill="white" opacity="0.85">✅ 24/24 tests passed</text>
+      <!-- typing dots -->
+      <g transform="translate(360,250)">
+        <circle r="3" fill="white" opacity="0.9"><animate attributeName="cy" values="0;-4;0" dur="0.9s" repeatCount="indefinite"/></circle>
+        <circle cx="8" r="3" fill="white" opacity="0.7"><animate attributeName="cy" values="0;-4;0" dur="0.9s" begin="0.15s" repeatCount="indefinite"/></circle>
+        <circle cx="16" r="3" fill="white" opacity="0.5"><animate attributeName="cy" values="0;-4;0" dur="0.9s" begin="0.3s" repeatCount="indefinite"/></circle>
+      </g>
+    </g>
+  </g>
+  <!-- glow underline -->
+  <rect x="18" y="286" width="386" height="3" rx="1.5" fill="url(#grad)" opacity="0.9">
+    <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" repeatCount="indefinite"/>
+  </rect>
+</g>
+
+<!-- bottom: animated pipeline -->
+<g transform="translate(32,372)">
+  <g font-family="JetBrains Mono, monospace" font-size="10" fill="#8b949e">
+    <text x="0" y="0">you → </text>
+    <tspan fill="#58a6ff" font-weight="700">understand</tspan><tspan> → </tspan><tspan fill="#a371f7">plan</tspan><tspan> → </tspan><tspan fill="#3fb950">tools</tspan><tspan> → </tspan><tspan fill="#f778ba">execute</tspan><tspan> → </tspan><tspan fill="#58a6ff">verify</tspan><tspan> → </tspan><tspan fill="#3fb950">done ✓</tspan>
+  </g>
+  <!-- moving dot -->
+  <g>
+    <circle r="3" fill="#58a6ff" filter="url(#glow)"><animateMotion path="M 0 10 H 760" dur="3s" repeatCount="indefinite" rotate="auto"/></circle>
+  </g>
+  <rect y="14" width="760" height="2" rx="1" fill="#21262d"/>
+  <rect y="14" height="2" rx="1" fill="url(#grad)" width="0">
+    <animate attributeName="width" values="0;760;0" dur="3s" repeatCount="indefinite"/>
+  </rect>
+</g>
+</svg>

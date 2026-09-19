@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0d1117"/><stop offset="100%" stop-color="#0a0e14"/></linearGradient>
+  <linearGradient id="a" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#2f81f7"/><stop offset="100%" stop-color="#8a5cf6"/></linearGradient>
+  <linearGradient id="b" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#3fb950"/><stop offset="100%" stop-color="#2f81f7"/></linearGradient>
+  <linearGradient id="c" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#f778ba"/><stop offset="100%" stop-color="#ff7b72"/></linearGradient>
+  <filter id="glow"><feGaussianBlur stdDeviation="3"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect width="960" height="520" rx="20" fill="url(#bg)" stroke="#21262d"/>
+<text x="32" y="36" font-family="Inter, system-ui, sans-serif" font-size="13" font-weight="800" fill="#58a6ff" letter-spacing="2">ARCHITECTURE — HOW IT ALL CONNECTS</text>
+
+<!-- Telegram -->
+<g transform="translate(32,62)">
+  <rect width="200" height="80" rx="16" fill="#1f6feb" opacity="0.95"/>
+  <text x="100" y="30" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="800" fill="white">Telegram</text>
+  <text x="100" y="48" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="white" opacity="0.9">input / output</text>
+  <text x="100" y="62" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="white" opacity="0.9">approval / control</text>
+</g>
+<!-- Gateway -->
+<g transform="translate(340,62)">
+  <rect width="200" height="80" rx="16" fill="#21262d" stroke="#30363d"/>
+  <text x="100" y="28" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="800" fill="#e6edf3">Gateway</text>
+  <text x="100" y="44" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8b949e">grammY • webhook/polling</text>
+  <text x="100" y="58" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8b949e">duplicate guard • 429</text>
+</g>
+<!-- Session -->
+<g transform="translate(620,62)">
+  <rect width="200" height="80" rx="16" fill="#21262d" stroke="#30363d"/>
+  <text x="100" y="28" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="800" fill="#e6edf3">Session Manager</text>
+  <text x="100" y="44" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8b949e">SQLite • per-chat lock</text>
+  <text x="100" y="58" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8b949e">1 active run / chat</text>
+</g>
+<!-- Orchestrator -->
+<g transform="translate(260,180)">
+  <rect width="440" height="92" rx="18" fill="url(#a)" opacity="0.95"/>
+  <text x="220" y="36" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="900" fill="white">Agent Orchestrator</text>
+  <text x="220" y="54" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="white" opacity="0.95">classify → state machine → tool loop → verify → retry</text>
+  <text x="220" y="70" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="white" opacity="0.9">scout subagents • auto-checkpoint • usage metering</text>
+</g>
+<!-- Providers -->
+<g transform="translate(80,310)">
+  <rect width="150" height="70" rx="14" fill="#21262d" stroke="#30363d"/>
+  <text x="75" y="26" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="800" fill="#58a6ff">9Router</text>
+  <text x="75" y="42" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#8b949e">default • auto</text>
+  <text x="75" y="54" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#8b949e">fallback chain</text>
+</g>
+<g transform="translate(280,310)">
+  <rect width="150" height="70" rx="14" fill="#21262d" stroke="#30363d"/>
+  <text x="75" y="26" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="800" fill="#a371f7">OpenAI / xAI</text>
+  <text x="75" y="42" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#8b949e">OpenAI-compat</text>
+  <text x="75" y="54" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#8b949e">stream → non-stream fallback</text>
+</g>
+<g transform="translate(480,310)">
+  <rect width="150" height="70" rx="14" fill="#21262d" stroke="#30363d"/>
+  <text x="75" y="26" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="800" fill="#f778ba">Anthropic</text>
+  <text x="75" y="42" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#8b949e">native Messages API</text>
+</g>
+<g transform="translate(680,310)">
+  <rect width="150" height="70" rx="14" fill="#21262d" stroke="#8b949e" stroke-dasharray="6 6"/>
+  <text x="75" y="26" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" font-weight="800" fill="#e6edf3">Custom / Ollama</text>
+  <text x="75" y="42" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#8b949e">any OpenAI /v1</text>
+</g>
+<!-- Tools -->
+<g transform="translate(32,420)">
+  <rect width="896" height="70" rx="16" fill="#161b22" stroke="#30363d"/>
+  <text x="18" y="22" font-family="Inter, sans-serif" font-size="11" font-weight="800" fill="#3fb950">70+ Tools • Harness</text>
+  <text x="18" y="40" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8b949e">files • search+nav • shell(PTY+bg) • git+worktree • verify • graph • scout • sqlite • web • supply-chain • archives • memory • checkpoint • doctor</text>
+  <text x="18" y="56" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#6e7681">→ workspace / sandbox (docker when available, local-boundary fallback) → PTY • git • graphify</text>
+</g>
+
+<!-- animated connectors -->
+<g stroke="#30363d" stroke-width="1.6" fill="none" opacity="0.9">
+  <path d="M232 102 H340"/><path d="M540 102 H620"/>
+  <path d="M480 142 V180"/><path d="M480 272 V310"/>
+  <!-- pulse dots -->
+  <circle r="4" fill="#58a6ff" filter="url(#glow)"><animateMotion path="M232 102 H340" dur="2s" repeatCount="indefinite"/></circle>
+  <circle r="4" fill="#58a6ff" filter="url(#glow)"><animateMotion path="M540 102 H620" dur="2s" begin="0.6s" repeatCount="indefinite"/></circle>
+  <circle r="4" fill="#a371f7" filter="url(#glow)"><animateMotion path="M480 142 V180" dur="1.8s" repeatCount="indefinite"/></circle>
+  <circle r="4" fill="#3fb950" filter="url(#glow)"><animateMotion path="M480 272 V310" dur="2s" repeatCount="indefinite"/></circle>
+</g>
+<!-- vertical lines to tool bar -->
+<g stroke="#21262d" stroke-width="1" opacity="0.7">
+  <path d="M155 380 V420"/><path d="M355 380 V420"/><path d="M555 380 V420"/><path d="M755 380 V420"/>
+</g>
+</svg>

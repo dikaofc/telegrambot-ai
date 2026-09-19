@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img">
+<defs>
+  <linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#2f81f7"/><stop offset="100%" stop-color="#8a5cf6"/></linearGradient>
+  <filter id="glow2"><feGaussianBlur stdDeviation="3"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect width="960" height="360" rx="20" fill="#0d1117" stroke="#21262d"/>
+<text x="32" y="34" font-family="Inter, sans-serif" font-size="13" font-weight="800" fill="#8b949e" letter-spacing="2">AGENT LOOP — AUTONOMOUS &amp; VERIFIED</text>
+
+<!-- 7 steps -->
+<g font-family="Inter, sans-serif" font-weight="800" font-size="11" text-anchor="middle">
+  <g transform="translate(90,100)">
+    <circle r="42" fill="#1f6feb" opacity="0.95"/><text y="4" fill="white">🧠</text><text y="18" font-size="8" fill="white" opacity="0.95">UNDERSTAND</text>
+    <text y="58" font-family="JetBrains Mono, monospace" font-size="8" font-weight="600" fill="#58a6ff">natural language</text>
+  </g>
+  <g transform="translate(230,100)">
+    <circle r="42" fill="#21262d" stroke="#30363d"/><text y="4" fill="#e6edf3">🔎</text><text y="18" font-size="8" fill="#e6edf3">DISCOVER</text>
+    <text y="58" font-family="JetBrains Mono, monospace" font-size="8" font-weight="600" fill="#8b949e">scout • graph • tree</text>
+  </g>
+  <g transform="translate(370,100)">
+    <circle r="42" fill="#21262d" stroke="#30363d"/><text y="4" fill="#e6edf3">🗺</text><text y="18" font-size="8" fill="#e6edf3">PLAN</text>
+    <text y="58" font-family="JetBrains Mono, monospace" font-size="8" font-weight="600" fill="#8b949e">skills • todos</text>
+  </g>
+  <g transform="translate(510,100)">
+    <circle r="42" fill="#21262d" stroke="#30363d"/><text y="4" fill="#e6edf3">🛠</text><text y="18" font-size="8" fill="#e6edf3">EXECUTE</text>
+    <text y="58" font-family="JetBrains Mono, monospace" font-size="8" font-weight="600" fill="#8b949e">70+ tools • PTY</text>
+  </g>
+  <g transform="translate(650,100)">
+    <circle r="42" fill="#21262d" stroke="#30363d"/><text y="4" fill="#e6edf3">👁</text><text y="18" font-size="8" fill="#e6edf3">OBSERVE</text>
+    <text y="58" font-family="JetBrains Mono, monospace" font-size="8" font-weight="600" fill="#8b949e">output • diff</text>
+  </g>
+  <g transform="translate(790,100)">
+    <circle r="42" fill="#1f6feb" opacity="0.95"/><text y="4" fill="white">✅</text><text y="18" font-size="8" fill="white" opacity="0.95">VERIFY</text>
+    <text y="58" font-family="JetBrains Mono, monospace" font-size="8" font-weight="600" fill="#58a6ff">tests • build</text>
+  </g>
+</g>
+<!-- arrows with traveling dots -->
+<g stroke="#30363d" stroke-width="1.8" fill="none" stroke-linecap="round">
+  <path d="M132 100 H188"/><path d="M272 100 H328"/><path d="M412 100 H468"/><path d="M552 100 H608"/><path d="M692 100 H748"/>
+  <g fill="#58a6ff" filter="url(#glow2)">
+    <circle r="4"><animateMotion path="M132 100 H188" dur="1.6s" repeatCount="indefinite"/></circle>
+    <circle r="4"><animateMotion path="M272 100 H328" dur="1.6s" begin="0.2s" repeatCount="indefinite"/></circle>
+    <circle r="4"><animateMotion path="M412 100 H468" dur="1.6s" begin="0.4s" repeatCount="indefinite"/></circle>
+    <circle r="4"><animateMotion path="M552 100 H608" dur="1.6s" begin="0.6s" repeatCount="indefinite"/></circle>
+    <circle r="4"><animateMotion path="M692 100 H748" dur="1.6s" begin="0.8s" repeatCount="indefinite"/></circle>
+  </g>
+</g>
+<!-- retry loop -->
+<g transform="translate(790,170)">
+  <path d="M 0 0 A 60 60 0 1 1 -80 48" fill="none" stroke="url(#g)" stroke-width="2.2" stroke-dasharray="6 6" opacity="0.9">
+    <animate attributeName="stroke-dashoffset" values="0;12" dur="0.8s" repeatCount="indefinite"/>
+  </path>
+  <text x="-36" y="-6" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#f778ba">retry → fix →</text>
+  <text x="-36" y="8" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" fill="#f778ba">re-verify</text>
+</g>
+<!-- bottom bar: guarantees -->
+<g transform="translate(32,250)">
+  <rect width="896" height="74" rx="14" fill="#161b22" stroke="#21262d"/>
+  <g font-family="JetBrains Mono, monospace" font-size="9" fill="#8b949e">
+    <text x="16" y="22" fill="#e6edf3" font-weight="700">Harness guarantees:</text>
+    <text x="16" y="40">• auto-checkpoint before first write  • per-run token/cost metering  • approval gate (SAFE auto / MEDIUM+ ask / CRITICAL deny)</text>
+    <text x="16" y="56">• read-only scout • sandbox (docker or boundary) • secret redaction • owner allowlist • /undo • no fake tool events</text>
+  </g>
+</g>
+</svg>
