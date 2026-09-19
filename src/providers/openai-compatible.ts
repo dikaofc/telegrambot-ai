@@ -77,10 +77,13 @@ export class OpenAICompatibleProvider implements LLMProvider {
             for (const ch of json.choices ?? []) {
               if (ch.delta?.content) yield { type: "text", text: ch.delta.content };
               for (const tc of ch.delta?.tool_calls ?? []) {
-                const id = tc.id ?? `call-${toolBuffers.size}`;
+                const id = (tc as { id?: string; index?: number }).id ?? `call-${(tc as { index?: number }).index ?? toolBuffers.size}`;
                 const cur = toolBuffers.get(id) ?? { name: "", args: "" };
                 if (tc.function?.name) cur.name = tc.function.name;
-                if (tc.function?.arguments) cur.args += tc.function.arguments;
+                // some providers (pollinations) send arguments as an object, not a string
+                const fargs = (tc.function as { arguments?: unknown } | undefined)?.arguments;
+                if (typeof fargs === "string") cur.args += fargs;
+                else if (fargs && typeof fargs === "object") cur.args = JSON.stringify(fargs);
                 toolBuffers.set(id, cur);
               }
               if (ch.finish_reason === "tool_calls" || ch.finish_reason === "stop") {

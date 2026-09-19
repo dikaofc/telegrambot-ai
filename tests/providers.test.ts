@@ -66,6 +66,26 @@ describe("provider routing", () => {
     server.close();
     delete process.env.PROVIDER_BASE_URL;
   }, 30000);
+  it("parses object-style tool arguments (pollinations) with index-grouped chunks", async () => {
+    const server = createServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      // arguments arrive as a JSON object (not string), chunks grouped by index
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "shell", arguments: { command: "ls" } } }] } }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+    server.listen(0);
+    await once(server, "listening");
+    const port = (server.address() as { port: number }).port;
+    const p = new OpenAICompatibleProvider({ id: "t", name: "T", baseUrl: `http://127.0.0.1:${port}`, apiKey: "k", defaultModel: "m" });
+    const events = [];
+    for await (const e of p.chat({ model: "m", messages: [{ role: "user", content: "hi" }], tools: [{ name: "shell", description: "s", schema: {} }] })) events.push(e);
+    const tc = events.find((e) => e.type === "tool_call");
+    expect(tc?.toolCall?.name).toBe("shell");
+    expect((tc?.toolCall?.args as Record<string, string>).command).toBe("ls");
+    server.close();
+  });
   it("falls back when primary is unreachable", async () => {
     const good = createServer((req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });

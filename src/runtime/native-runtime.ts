@@ -226,17 +226,25 @@ export class NativeRuntime implements AgentRuntime {
       // risk + approval gate
       let risk = toolRisk(pendingTool.name);
       let commandForApproval = pendingTool.name;
-      if ((pendingTool.name === "shell" || pendingTool.name === "shell_start" || pendingTool.name === "shell_input") && typeof pendingTool.args.command === "string") {
+      const isShell = pendingTool.name === "shell" || pendingTool.name === "shell_start" || pendingTool.name === "shell_input" || pendingTool.name === "shell_batch";
+      if (isShell && typeof pendingTool.args.command === "string") {
         const v = classifyCommand(pendingTool.args.command);
         risk = v.risk;
         commandForApproval = v.normalized;
+      } else if (isShell) {
+        // model sent malformed args — show them so approval (if any) is informative
+        commandForApproval = `${pendingTool.name} ${JSON.stringify(pendingTool.args).slice(0, 160)}`;
       }
       if (pendingTool.name === "shell_input" && typeof pendingTool.args.data === "string") {
         const v = classifyCommand(pendingTool.args.data);
-        if (v.risk === RiskLevel.CRITICAL) risk = v.risk;
-        commandForApproval = `stdin → ${v.normalized.slice(0, 120)}`;
+        if (v.risk === RiskLevel.CRITICAL) { risk = v.risk; commandForApproval = `stdin → ${v.normalized.slice(0, 120)}`; }
       }
-      const decision = policyForRisk(risk);
+      let decision = policyForRisk(risk);
+      if (isShell && decision === "ask") {
+        // Owner policy: shell always runs without waiting for approval taps.
+        // CRITICAL (rm -rf /, mkfs, …) stays denied; everything else auto-approved.
+        decision = "auto";
+      }
       const t0 = Date.now();
       metrics.toolCallsTotal.inc();
 
