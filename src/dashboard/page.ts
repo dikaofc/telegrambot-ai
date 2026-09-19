@@ -63,15 +63,15 @@ label{font-weight:800;text-transform:uppercase;font-size:12px;display:block;marg
 </head>
 <body>
 <header>
-  <h1>🤖 TELEAGENT <span>SUPER HARNESS</span></h1>
+  <h1>TELEAGENT <span>SUPER HARNESS</span></h1>
   <span class="pill" id="p-status">…</span>
   <span class="pill" id="p-provider">…</span>
   <span class="pill" id="p-runs">…</span>
   <div class="hdr-actions">
     <input id="apiKey" type="password" placeholder="API key (jika ada)">
     <button onclick="saveKey()">SAVE</button>
-    <button onclick="refresh()">⟳ REFRESH</button>
-    <button class="burger" onclick="toggleNav()">☰ MENU</button>
+    <button onclick="refresh()">REFRESH</button>
+    <button class="burger" onclick="toggleNav()">MENU</button>
   </div>
 </header>
 <nav id="tabs"></nav>
@@ -100,73 +100,73 @@ async function refresh(){
     $("p-provider").textContent=s.provider+" / "+s.model;
     $("p-runs").textContent="RUNS: "+s.activeRuns;
   }catch(e){$("p-status").textContent="OFFLINE";$("p-status").className="pill bad"}
-  const v=$("view");v.innerHTML="<div class=\\"panel\\"><b>LOADING…</b> bentar ya</div>";
+  const v=$("view");v.innerHTML="<div class=\\"panel\\"><b>Memuat data...</b> sebentar</div>";
   try{await VIEWS[cur](v)}catch(e){v.innerHTML="<div class=\\"panel\\"><pre>"+esc(e.message)+"</pre></div>"}
 }
 const VIEWS={
 Status:async v=>{
   const s=await api("/api/status");
-  v.innerHTML='<div class="panel"><h3>🩺 Health</h3><pre>'+esc(JSON.stringify(s.health,null,2))+'</pre></div>'
-  +'<div class="panel"><h3>📊 Counts</h3><div class="grid">'+Object.entries(s.counts).map(([k,val])=>'<div class="card"><b>'+val+'</b><span>'+esc(k)+'</span></div>').join("")+'</div></div>'
-  +'<div class="panel"><h3>⚙️ Runtime</h3><pre>'+esc(JSON.stringify({provider:s.provider,model:s.model,activeRuns:s.activeRuns,access:s.access,workspace:s.workspace},null,2))+'</pre></div>';
+  v.innerHTML='<div class="panel"><h3>Health</h3><pre>'+esc(JSON.stringify(s.health,null,2))+'</pre></div>'
+  +'<div class="panel"><h3>Counts</h3><div class="grid">'+Object.entries(s.counts).map(([k,val])=>'<div class="card"><b>'+val+'</b><span>'+esc(k)+'</span></div>').join("")+'</div></div>'
+  +'<div class="panel"><h3>Runtime</h3><pre>'+esc(JSON.stringify({provider:s.provider,model:s.model,activeRuns:s.activeRuns,access:s.access,workspace:s.workspace},null,2))+'</pre></div>';
 },
 Sessions:async v=>{
   const d=await api("/api/sessions?limit=50");
-  v.innerHTML='<div class="panel"><h3>💬 Sessions ('+d.sessions.length+')</h3><table><tr><th>id</th><th>chat</th><th>provider/model</th><th>status</th><th>updated</th></tr>'
+  v.innerHTML='<div class="panel"><h3>Sessions ('+d.sessions.length+')</h3><table><tr><th>id</th><th>chat</th><th>provider/model</th><th>status</th><th>updated</th></tr>'
   +d.sessions.map(s=>'<tr><td><code>'+esc(s.id.slice(0,8))+'</code></td><td><code>'+esc(s.chat_id.slice(0,8))+'</code></td><td>'+esc(s.provider)+' / '+esc(s.model)+'</td><td><span class="badge">'+esc(s.status)+'</span></td><td>'+esc(s.updated_at||"")+'</td></tr>').join("")+'</table></div>';
 },
 Runs:async v=>{
   const d=await api("/api/runs?limit=50");
-  v.innerHTML='<div class="panel"><h3>▶️ Runs ('+d.runs.length+')</h3><table><tr><th>id</th><th>session</th><th>input</th><th>status</th><th>tokens</th><th>aksi</th></tr>'
+  v.innerHTML='<div class="panel"><h3>Runs ('+d.runs.length+')</h3><table><tr><th>id</th><th>session</th><th>input</th><th>status</th><th>tokens</th><th>aksi</th></tr>'
   +d.runs.map(r=>'<tr><td><code>'+esc(r.id.slice(0,8))+'</code></td><td><code>'+esc(String(r.session_id).slice(0,8))+'</code></td><td>'+esc(String(r.input).slice(0,80))+'</td><td><span class="badge">'+esc(r.status)+'</span></td><td>'+(r.tokens_input||0)+'+'+(r.tokens_output||0)+'</td><td>'+(r.status==="running"?'<button class="act danger" onclick="stopRun(\\''+r.id+'\\')">STOP</button>':"")+'</td></tr>').join("")+'</table></div>';
 },
 Approvals:async v=>{
   const d=await api("/api/approvals/pending");
-  v.innerHTML='<div class="panel"><h3>⚠️ Pending approvals ('+d.approvals.length+')</h3><table><tr><th>id</th><th>tool</th><th>command</th><th>risk</th><th>aksi</th></tr>'
+  v.innerHTML='<div class="panel"><h3>Pending Approvals ('+d.approvals.length+')</h3><table><tr><th>id</th><th>tool</th><th>command</th><th>risk</th><th>aksi</th></tr>'
   +d.approvals.map(a=>'<tr><td><code>'+esc(a.id.slice(0,8))+'</code></td><td>'+esc(a.tool)+'</td><td><code>'+esc(String(a.command).slice(0,120))+'</code></td><td><span class="badge">'+esc(a.risk)+'</span></td><td><button class="act" onclick="resolveAppr(\\''+a.id+'\\',\\'approved\\')">APPROVE</button><button class="act danger" onclick="resolveAppr(\\''+a.id+'\\',\\'rejected\\')">REJECT</button></td></tr>').join("")+'</table></div>';
 },
 Workspaces:async v=>{
   const d=await api("/api/workspaces");
-  v.innerHTML='<div class="panel"><h3>📁 Workspaces</h3><table><tr><th>nama</th><th>path</th><th>profile</th></tr>'
+  v.innerHTML='<div class="panel"><h3>Workspaces</h3><table><tr><th>nama</th><th>path</th><th>profile</th></tr>'
   +d.workspaces.map(w=>'<tr><td><b>'+esc(w.name)+'</b></td><td><code>'+esc(w.path)+'</code></td><td><code>'+esc(JSON.stringify(w.profile||{}))+'</code></td></tr>').join("")+'</table></div>';
 },
 Providers:async v=>{
   const d=await api("/api/providers");
-  v.innerHTML='<div class="panel"><h3>🔌 Providers</h3><table><tr><th>provider</th><th>selected</th><th>health</th><th>models (top 8)</th></tr>'
+  v.innerHTML='<div class="panel"><h3>Providers</h3><table><tr><th>provider</th><th>selected</th><th>health</th><th>models (top 8)</th></tr>'
   +d.providers.map(p=>'<tr><td><b>'+esc(p.name)+'</b></td><td>'+(p.selected?'<span class="pill ok">SELECTED</span>':'—')+'</td><td>'+(p.healthy?'<span class="pill ok">OK</span>':'<span class="pill bad">DOWN</span>')+'</td><td><code>'+esc((p.models||[]).slice(0,8).join(", "))+'</code></td></tr>').join("")+'</table><div class="panel" style="margin-top:12px"><b>Tips:</b> ganti via <code>.env</code> PROVIDER atau <code>/provider</code> di Telegram. Single universal key.</div>';
 },
 Usage:async v=>{
   const u=await api("/api/usage");
-  v.innerHTML='<div class="panel"><h3>📈 Total</h3><div class="grid"><div class="card"><b>'+u.total.runs+'</b><span>runs</span></div><div class="card"><b>'+(u.total.t_in+u.total.t_out)+'</b><span>tokens</span></div><div class="card"><b>$'+Number(u.total.cost).toFixed(4)+'</b><span>cost</span></div></div></div>'
+  v.innerHTML='<div class="panel"><h3>Total</h3><div class="grid"><div class="card"><b>'+u.total.runs+'</b><span>runs</span></div><div class="card"><b>'+(u.total.t_in+u.total.t_out)+'</b><span>tokens</span></div><div class="card"><b>$'+Number(u.total.cost).toFixed(4)+'</b><span>cost</span></div></div></div>'
   +'<div class="panel"><h3>Per model</h3><table><tr><th>provider</th><th>model</th><th>runs</th><th>tokens</th><th>cost</th></tr>'
   +u.perModel.map(m=>'<tr><td>'+esc(m.provider)+'</td><td>'+esc(m.model)+'</td><td>'+m.runs+'</td><td>'+(m.t_in+m.t_out)+'</td><td>$'+Number(m.cost).toFixed(4)+'</td></tr>').join("")+'</table></div>';
 },
 Audit:async v=>{
   const d=await api("/api/audit?limit=100");
-  v.innerHTML='<div class="panel"><h3>🕵️ Audit (100 terbaru, secrets di-redact)</h3><table><tr><th>time</th><th>tool</th><th>risk</th><th>approval</th><th>exit</th><th>ms</th></tr>'
+  v.innerHTML='<div class="panel"><h3>Audit (100 terbaru, secrets di-redact)</h3><table><tr><th>time</th><th>tool</th><th>risk</th><th>approval</th><th>exit</th><th>ms</th></tr>'
   +d.logs.map(l=>'<tr><td>'+esc((l.created_at||"").slice(0,19))+'</td><td>'+esc(l.tool||"")+'</td><td>'+esc(l.risk||"")+'</td><td>'+esc(l.approval||"")+'</td><td>'+(l.exit_code??"")+'</td><td>'+(l.duration_ms??"")+'</td></tr>').join("")+'</table></div>';
 },
 Settings:async v=>{
   const d=await api("/api/settings");
-  v.innerHTML='<div class="panel"><h3>⚙️ Settings</h3><table><tr><th>key</th><th>scope</th><th>value</th></tr>'
+  v.innerHTML='<div class="panel"><h3>Settings</h3><table><tr><th>key</th><th>scope</th><th>value</th></tr>'
   +d.settings.map(s=>'<tr><td><code>'+esc(s.key)+'</code></td><td>'+esc(s.scope)+'/'+esc(s.scope_id.slice(0,8))+'</td><td><code>'+esc(String(s.value).slice(0,80))+'</code></td></tr>').join("")+'</table></div>'
-  +'<div class="panel"><h3>➕ Set value</h3><label>key</label><input id="s-key" placeholder="model"><label>value</label><input id="s-val" placeholder="cph/cehpoint-ai"><label>scope</label><select id="s-scope"><option>global</option><option>session</option><option>workspace</option><option>user</option></select><label>scope id (optional)</label><input id="s-id" placeholder=""><div class="row" style="margin-top:10px"><button class="act" onclick="saveSetting()">SAVE SETTING</button></div><p style="font-weight:700">⚠️ Secrets (API keys) cuma bisa via .env, nggak bisa di sini.</p></div>';
+  +'<div class="panel"><h3>Set Value</h3><label>key</label><input id="s-key" placeholder="model"><label>value</label><input id="s-val" placeholder="cph/cehpoint-ai"><label>scope</label><select id="s-scope"><option>global</option><option>session</option><option>workspace</option><option>user</option></select><label>scope id (optional)</label><input id="s-id" placeholder=""><div class="row" style="margin-top:10px"><button class="act" onclick="saveSetting()">SAVE SETTING</button></div><p style="font-weight:700">⚠️ Secrets (API keys) cuma bisa via .env, nggak bisa di sini.</p></div>';
 },
 Graphify:async v=>{
   const ws=(await api("/api/workspaces")).workspaces;
   const opts=ws.map(w=>'<option value="'+esc(w.name)+'">'+esc(w.name)+'</option>').join("");
-  v.innerHTML='<div class="panel"><h3>🕸️ Knowledge Graph</h3><label>workspace</label><select id="g-ws">'+opts+'</select><div class="row"><button class="act" onclick="gStatus()">STATUS</button><button class="act" onclick="gBuild(false)">BUILD</button><button class="act ghost" onclick="gBuild(true)">UPDATE</button></div><pre id="g-out">pilih workspace → status</pre></div>'
-  +'<div class="panel"><h3>🔍 Query</h3><input id="g-q" placeholder="what connects auth to database?"><div class="row"><button class="act" onclick="gQuery()">QUERY</button><button class="act ghost" onclick="gExplain()">EXPLAIN SYMBOL</button></div><label>path from → to</label><div class="row"><input id="g-a" placeholder="UserService" style="flex:1"><input id="g-b" placeholder="DatabasePool" style="flex:1"><button class="act" onclick="gPath()">PATH</button></div><pre id="g-qout"></pre></div>';
+  v.innerHTML='<div class="panel"><h3>Knowledge Graph</h3><label>workspace</label><select id="g-ws">'+opts+'</select><div class="row"><button class="act" onclick="gStatus()">STATUS</button><button class="act" onclick="gBuild(false)">BUILD</button><button class="act ghost" onclick="gBuild(true)">UPDATE</button></div><pre id="g-out">Pilih workspace untuk cek status</pre></div>'
+  +'<div class="panel"><h3>Query</h3><input id="g-q" placeholder="what connects auth to database?"><div class="row"><button class="act" onclick="gQuery()">QUERY</button><button class="act ghost" onclick="gExplain()">EXPLAIN SYMBOL</button></div><label>path from → to</label><div class="row"><input id="g-a" placeholder="UserService" style="flex:1"><input id="g-b" placeholder="DatabasePool" style="flex:1"><button class="act" onclick="gPath()">PATH</button></div><pre id="g-qout"></pre></div>';
 }
 };
 async function stopRun(id){await api("/api/runs/"+id+"/stop",{method:"POST"});refresh()}
 async function resolveAppr(id,st){await api("/api/approvals/"+id,{method:"POST",body:JSON.stringify({status:st})});refresh()}
 async function saveSetting(){await api("/api/settings",{method:"POST",body:JSON.stringify({key:$("s-key").value,value:$("s-val").value,scope:$("s-scope").value,scopeId:$("s-id").value})});refresh()}
 async function gStatus(){try{$("g-out").textContent=JSON.stringify(await api("/api/graphify/status?workspace="+encodeURIComponent($("g-ws").value)),null,2)}catch(e){$("g-out").textContent=e.message}}
-async function gBuild(u){$("g-out").textContent="⏳ working… bisa makan waktu menit";try{$("g-out").textContent=JSON.stringify(await api("/api/graphify/build",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,updateOnly:u})}),null,2)}catch(e){$("g-out").textContent=e.message}}
-async function gQuery(){$("g-qout").textContent="🔎 querying…";try{$("g-qout").textContent=(await api("/api/graphify/query",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,question:$("g-q").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
-async function gExplain(){$("g-qout").textContent="explaining…";try{$("g-qout").textContent=(await api("/api/graphify/explain",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,symbol:$("g-q").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
-async function gPath(){$("g-qout").textContent="tracing…";try{$("g-qout").textContent=(await api("/api/graphify/path",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,from:$("g-a").value,to:$("g-b").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
+async function gBuild(u){$("g-out").textContent="Memproses — bisa beberapa menit";try{$("g-out").textContent=JSON.stringify(await api("/api/graphify/build",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,updateOnly:u})}),null,2)}catch(e){$("g-out").textContent=e.message}}
+async function gQuery(){$("g-qout").textContent="Mencari...";try{$("g-qout").textContent=(await api("/api/graphify/query",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,question:$("g-q").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
+async function gExplain(){$("g-qout").textContent="Menjelaskan...";try{$("g-qout").textContent=(await api("/api/graphify/explain",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,symbol:$("g-q").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
+async function gPath(){$("g-qout").textContent="Menelusuri jalur...";try{$("g-qout").textContent=(await api("/api/graphify/path",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,from:$("g-a").value,to:$("g-b").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
 refresh();setInterval(()=>{if(cur==="Approvals"||cur==="Runs"||cur==="Status")refresh()},15000);
 </script>
 </body>
