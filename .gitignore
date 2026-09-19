@@ -1,8 +1,11 @@
 node_modules/
 dist/
 data/
+workspaces/
 *.db
 *.db-journal
 .env
 .DS_Store
 coverage/
+tmp/
+*.log
