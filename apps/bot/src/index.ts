@@ -3,6 +3,7 @@ import { checkHealth } from "../../../src/observability/health.js";
 import { getLogger } from "../../../src/observability/logger.js";
 import { openDatabase } from "../../../src/database/db.js";
 import { createBot } from "../../../src/telegram/gateway.js";
+import { applyBotMenu } from "../../../src/telegram/commands.js";
 import { buildApiServer } from "../../../src/api/server.js";
 import { recoverInterruptedRuns } from "../../../src/agent/recovery.js";
 
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
     return;
   }
   const bot = createBot();
+  await applyBotMenu(bot);
   const webhookUrl = env.TELEGRAM_WEBHOOK_URL;
   if (webhookUrl) {
     await api.ready();

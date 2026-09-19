@@ -21,7 +21,12 @@ export function listSkills(skillsRoot = "skills"): Skill[] {
 }
 
 const ROUTES: Array<{ re: RegExp; skill: string }> = [
-  { re: /graph|knowledge graph|what connects|how.*relat|explain \w+|architecture/i, skill: "graphify" },
+  { re: /graph|knowledge graph|what connects|how.*relat|architecture/i, skill: "graphify" },
+  { re: /\bexplain\s+\w+/, skill: "graphify" },
+  { re: /review|look at.*code|is this (code|correct)|audit code/i, skill: "reviewer" },
+  { re: /write tests?|add tests?|coverage|test-driven/i, skill: "testing" },
+  { re: /refactor|clean up|restructure|simplify/i, skill: "refactor" },
+  { re: /secur|vulnerab|injection|xss|auth bypass|harden/i, skill: "security" },
   { re: /debug|error|fail|crash|bug|leak|stack/i, skill: "debugging" },
   { re: /test|coverage|vitest|pytest/i, skill: "debugging" },
   { re: /git|commit|branch|merge|rebase|pr\b/i, skill: "git" },

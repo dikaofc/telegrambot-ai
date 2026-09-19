@@ -82,6 +82,20 @@ export async function stopRun(runId: string): Promise<boolean> {
   return true;
 }
 
+export async function pauseRun(runId: string): Promise<boolean> {
+  const r = activeRuns.get(runId);
+  if (!r) return false;
+  await r.pause();
+  return true;
+}
+
+export async function resumeRun(runId: string): Promise<boolean> {
+  const r = activeRuns.get(runId);
+  if (!r) return false;
+  await r.resume();
+  return true;
+}
+
 export function ensureSession(userId: string, chatDbId: string, workspaceName: string, provider: string, model: string): string {
   const wsPath = resolveWorkspacePath(workspaceName || "default");
   const wsId = store.ensureWorkspace(workspaceName || "default", wsPath, userId);

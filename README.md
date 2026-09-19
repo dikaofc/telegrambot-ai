@@ -77,10 +77,40 @@ Telegram → Gateway → Session Manager → Agent Orchestrator → Providers
 | git | `git_status git_diff git_log git_show git_branch git_checkout git_commit` |
 | verify | `npm_test npm_build npm_install detect_pm` (deterministic per project) |
 | graph | `graphify_status graphify_build graphify_query graphify_path graphify_explain` |
-| web | `http_get http_post fetch_text` (SSRF-protected) |
-| archives | `archive_extract` (traversal + zip-bomb guarded; Telegram uploads auto-extract) |
-| plan/memory | `todo_write todo_list memory_remember memory_recall project_profile env_info checkpoint_create checkpoint_restore` |
+| web | `http_get http_post http_download fetch_text web_search` (SSRF-protected; search keyless best-effort) |
+| archives | `archive_extract` (traversal + zip-bomb guarded; Telegram uploads auto-extract) + `zip_create` (.tar.gz/.zip to send results back) |
+| refactor | `search_replace` (dry-run first), `symbol_outline` (offline symbol map), `format_code`, `lint_tool`, `typecheck_tool`, `audit_deps` (npm/pip/cargo vuln audit) |
+| plan/memory | `todo_write todo_list memory_remember memory_recall project_profile env_info checkpoint_create checkpoint_restore doctor_check quota_status` |
 | system | `process_list process_kill` (+ browser tools when a worker is configured) |
+
+## Telegram slash commands (full control — natural language still works)
+
+| command | what for | usage |
+|---|---|---|
+| `/start` | welcome + live connection status | `/start` |
+| `/help` | full command reference in-chat | `/help` |
+| `/status` | session, provider/model, workspace, active + last run | `/status` |
+| `/settings` | settings panel (inline buttons) | `/settings` |
+| `/model <name>` | switch model for this chat | `/model cbai/minimax-m3` |
+| `/provider <name>` | switch provider (`9router|openai|xai|anthropic|ollama|custom`) | `/provider openai` |
+| `/workspace <name>` | switch active workspace (fuzzy match) | `/workspace my-project` |
+| `/new` | fresh session, keep old history in DB | `/new` |
+| `/stop` (`/cancel`) | cancel active run (kills model + PTY + process) | `/stop` |
+| `/pause` / `/resume` | pause/resume active run, state saved | `/pause` |
+| `/retry` | re-run your last message | `/retry` |
+| `/diff` | uncommitted changes (`--stat` + full `.diff` file if large) | `/diff` |
+| `/log [n]` | tool-call log of last run (✓/✗, risk, ms, exit) | `/log 30` |
+| `/undo` | restore latest checkpoint (stashes current work first) | `/undo` |
+| `/approvals` | list pending approvals with short ids | `/approvals` |
+| `/approve <id>` | approve (first chars of id suffice) | `/approve a8f31d` |
+| `/reject <id>` | reject; agent works around it | `/reject a8f31d` |
+| `/usage` | tokens today/quota + lifetime runs/cost | `/usage` |
+| `/doctor` | self-diagnose telegram/db/provider/sandbox/pty | `/doctor` |
+| `/graph <q>` | ask the knowledge graph | `/graph what connects auth to the database?` |
+
+The menu above is also registered as the Telegram client command list
+(`setMyCommands`), so it appears in the `/` autocomplete. Plain words work too:
+`stop`, `pause`, `resume` behave like their slash versions.
 
 ## Knowledge-graph harness (Graphify)
 

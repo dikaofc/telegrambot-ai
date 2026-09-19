@@ -98,6 +98,19 @@ export function buildRegistry(): Map<string, ToolDefinition> {
   add(def("git_checkout", "Checkout a branch/commit", { ref: "string" }, async (a, c) => ext.toolGitCheckout(c.workspacePath, String(a.ref))));
   add(def("git_log", "Recent commits", { n: "number?" }, async (a, c) => ext.toolGitLog(c.workspacePath, typeof a.n === "number" ? a.n as number : 10)));
   add(def("git_show", "Show a commit or file at a ref", { ref: "string", file: "string?" }, async (a, c) => ext.toolGitShow(c.workspacePath, String(a.ref), a.file === undefined ? undefined : String(a.file))));
+  // ---- web + supply chain + code intelligence ----
+  add(def("http_download", "Download a URL into the workspace (SSRF-protected)", { url: "string", dest: "string" }, async (a, c) => ext.toolDownload(String(a.url), String(a.dest), c.workspacePath)));
+  add(def("zip_create", "Archive workspace paths into .tar.gz/.zip (to send results back)", { paths: "string[]", out: "string" }, async (a, c) => ext.toolZipCreate(c.workspacePath, Array.isArray(a.paths) ? (a.paths as string[]) : [], String(a.out))));
+  add(def("search_replace", "Regex find/replace across files (dryRun first!)", { pattern: "string", replacement: "string", include: "string?", dryRun: "boolean?" }, async (a, c) => ext.toolSearchReplace(c.workspacePath, String(a.pattern), String(a.replacement ?? ""), a.include === undefined ? undefined : String(a.include), a.dryRun === undefined ? true : Boolean(a.dryRun))));
+  add(def("symbol_outline", "Offline symbol map of one file (functions/classes with line numbers)", { target: "string" }, async (a, c) => ext.toolSymbolOutline(c.workspacePath, String(a.target))));
+  add(def("web_search", "Keyless web search (best-effort docs lookup)", { query: "string" }, async (a) => ext.toolWebSearch(String(a.query))));
+  add(def("audit_deps", "Dependency vulnerability audit (npm/pip/cargo)", {}, async (_a, c) => ext.toolAuditDeps(c.workspacePath)));
+  add(def("format_code", "Run project formatter (prettier/black/gofmt/cargo fmt)", {}, async (_a, c) => ext.toolFormatCode(c.workspacePath)));
+  add(def("lint_tool", "Run project lint command", {}, async (_a, c) => ext.toolLint(c.workspacePath)));
+  add(def("typecheck_tool", "Run project typecheck command", {}, async (_a, c) => ext.toolTypecheck(c.workspacePath)));
+  add(def("git_stash", "Stash current changes with a message", { message: "string?" }, async (a, c) => ext.toolGitStash(c.workspacePath, a.message === undefined ? undefined : String(a.message))));
+  add(def("doctor_check", "Self-diagnose: telegram/db/provider/sandbox/workspace/pty", {}, async () => ext.toolDoctor()));
+  add(def("quota_status", "Token quota + usage for current user", {}, async (_a, c) => ext.toolQuotaStatus(c.userId ?? "")));
   return m;
 }
 

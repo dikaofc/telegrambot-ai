@@ -407,3 +407,225 @@ export async function toolRunBuild(ws: string): Promise<ToolResult> {
 export async function toolExec(ws: string, command: string, timeoutMs?: number): Promise<ToolResult> {
   return execCommand(command, { cwd: ws, timeoutMs: timeoutMs ?? 120_000 });
 }
+
+// ---------- download / archive create ----------
+
+export async function toolDownload(url: string, destRel: string, ws: string, timeoutMs = 120_000): Promise<ToolResult> {
+  try {
+    const { downloadFile } = await import("./http.js");
+    const { assertInsideWorkspace } = await import("../workspace/manager.js");
+    const trusted: string[] = [];
+    const dest = assertInsideWorkspace(ws, destRel);
+    const fsMod = await import("node:fs");
+    const pathMod = await import("node:path");
+    fsMod.mkdirSync(pathMod.dirname(dest), { recursive: true });
+    void trusted;
+    return downloadFile(url, dest, timeoutMs);
+  } catch (e) { return fail(String(e)); }
+}
+
+export async function toolZipCreate(ws: string, paths: string[], outRel: string): Promise<ToolResult> {
+  try {
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 50) return fail("paths[] required (1-50)");
+    const { assertInsideWorkspace } = await import("../workspace/manager.js");
+    const out = assertInsideWorkspace(ws, outRel);
+    const safe = paths.map((p) => assertInsideWorkspace(ws, p));
+    const rel = safe.map((p) => path.relative(ws, p));
+    const fsMod = await import("node:fs");
+    fsMod.mkdirSync(path.dirname(out), { recursive: true });
+    const low = out.toLowerCase();
+    if (low.endsWith(".tar.gz") || low.endsWith(".tgz")) {
+      await execFileAsync("tar", ["-czf", out, "-C", ws, ...rel], { timeout: 300_000 });
+    } else if (low.endsWith(".zip") && await commandExists("python3")) {
+      await execFileAsync("python3", ["-c",
+        "import zipfile,sys,os\nws, out, files = sys.argv[1], sys.argv[2], sys.argv[3:]\nwith zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:\n for f in files:\n  full=os.path.join(ws,f)\n  z.write(full, f) if os.path.isfile(full) else [z.write(os.path.join(r,fn), os.path.relpath(os.path.join(r,fn), ws)) for r,_,fs in os.walk(full) for fn in fs]",
+        ws, out, ...rel], { timeout: 300_000 });
+    } else if (low.endsWith(".zip")) {
+      await execFileAsync("tar", ["-caf", out, "-C", ws, ...rel], { timeout: 300_000 });
+    } else {
+      return fail("output must end with .tar.gz, .tgz or .zip");
+    }
+    const st = fs.statSync(out);
+    return ok(`created ${outRel} (${st.size} bytes)`, { filesChanged: [outRel] });
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- search & replace across files ----------
+
+export async function toolSearchReplace(ws: string, pattern: string, replacement: string, include = "*.{ts,js,py,go,rs}", dryRun = true, maxFiles = 20): Promise<ToolResult> {
+  try {
+    const re = new RegExp(pattern, "g");
+    const { globFiles } = await import("./search.js");
+    void globFiles;
+    const { execArgs: ea } = await import("./shell.js");
+    // candidate files via grep
+    const grep = await ea("grep", ["-rl", "-e", pattern, "."], ws, 60_000);
+    if (!grep.success) return ok("no matches found");
+    let files = (grep.output ?? "").split("\n").map((s) => s.trim().replace(/^\.\//, "")).filter(Boolean);
+    if (include) {
+      const incRe = new RegExp("^" + include.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\{[^}]*\}/g, (m) => `(?:${m.slice(1, -1).replace(/,/g, "|")})`).replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+      files = files.filter((f) => incRe.test(f) || incRe.test("x." + f.split(".").pop()));
+    }
+    files = files.slice(0, maxFiles);
+    const report: string[] = [];
+    let total = 0;
+    for (const f of files) {
+      const resolved = assertInsideWorkspace(ws, f);
+      let cur: string;
+      try { cur = fs.readFileSync(resolved, "utf8"); } catch { continue; }
+      const n = (cur.match(re) ?? []).length;
+      if (n === 0) continue;
+      total += n;
+      report.push(`${f}: ${n} occurrence(s)${dryRun ? " (dry-run)" : " REPLACED"}`);
+      if (!dryRun) fs.writeFileSync(resolved, cur.replace(re, replacement), "utf8");
+    }
+    if (report.length === 0) return ok("no matches found");
+    return ok(`${dryRun ? "[dry-run] would replace" : "replaced"} ${total} occurrence(s) in ${report.length} file(s):\n` + report.join("\n"),
+      dryRun ? undefined : { filesChanged: files });
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- symbol outline (offline code map, no graphify needed) ----------
+
+const SYMBOL_RES: Array<{ lang: string; res: RegExp[] }> = [
+  { lang: "ts/js", res: [/^\s*export\s+(async\s+)?(function|class|const|interface|type|enum)\s+([\w$]+)/, /^\s*(async\s+)?function\s+([\w$]+)/, /^\s*class\s+([\w$]+)/, /^\s*(?:export\s+default\s+)?(?:async\s+)?([\w$]+)\s*=\s*\(.*\)\s*=>/, /^\s{0,4}(?:public|private|protected)?\s*(?:async\s+)?([\w$]+)\s*\(.*\)\s*\{/] },
+  { lang: "py", res: [/^\s*(async\s+)?def\s+(\w+)/, /^\s*class\s+(\w+)/] },
+  { lang: "go", res: [/^\s*func\s+(?:\([^)]*\)\s*)?(\w+)/, /^\s*type\s+(\w+)/] },
+  { lang: "rs", res: [/^\s*(?:pub\s+)?fn\s+(\w+)/, /^\s*(?:pub\s+)?(?:struct|enum|trait)\s+(\w+)/] },
+  { lang: "java/kt", res: [/^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:class|interface|enum|fun)\s+(\w+)/, /^\s*(?:public|private|protected)?\s*[\w<>\[\]]+\s+(\w+)\s*\(/] },
+];
+
+export async function toolSymbolOutline(ws: string, target: string, maxSymbols = 100): Promise<ToolResult> {
+  try {
+    const resolved = assertInsideWorkspace(ws, target);
+    const lines = fs.readFileSync(resolved, "utf8").split("\n");
+    const out: string[] = [];
+    lines.forEach((line, i) => {
+      for (const { res } of SYMBOL_RES) {
+        for (const re of res) {
+          const m = re.exec(line);
+          const name = m?.[m.length - 1];
+          if (name && !/^(if|for|while|switch|catch|return)$/.test(name)) {
+            out.push(`L${i + 1} ${name}`);
+            break;
+          }
+        }
+        if (out.length >= maxSymbols) break;
+      }
+    });
+    return ok(out.length ? out.slice(0, maxSymbols).join("\n") : "(no symbols detected)");
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- web search (keyless, best-effort) ----------
+
+export async function toolWebSearch(query: string, maxResults = 5): Promise<ToolResult> {
+  try {
+    const { assertSafeUrl } = await import("../security/ssrf.js");
+    const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+    assertSafeUrl(url);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20_000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, headers: { "user-agent": "Mozilla/5.0 (compatible; teleagent/1.0)" } });
+      if (!res.ok) return fail(`search HTTP ${res.status}`);
+      const html = await res.text();
+      const results: string[] = [];
+      const re = /<a[^>]+href="([^"]+)"[^>]*>([^<]{5,200})<\/a>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(html)) && results.length < Math.min(Math.max(maxResults, 1), 10)) {
+        const href = m[1] ?? "";
+        const title = (m[2] ?? "").trim();
+        if (!href.startsWith("http") || /duckduckgo\.com/i.test(href)) continue;
+        results.push(`- ${title}\n  ${href}`);
+      }
+      if (results.length === 0) return fail("no results (search backend may be blocking automated queries)");
+      return ok(results.join("\n"));
+    } finally { clearTimeout(t); }
+  } catch (e) { return fail(String(e)); }
+}
+
+// ---------- dependency audit / format / lint / typecheck ----------
+
+export async function toolAuditDeps(ws: string): Promise<ToolResult> {
+  try {
+    const pathMod = await import("node:path");
+    const fsMod = await import("node:fs");
+    if (fsMod.existsSync(pathMod.join(ws, "package.json"))) {
+      const r = await execCommand("npm audit --json", { cwd: ws, timeoutMs: 120_000 });
+      const raw = (r.output ?? r.error ?? "").slice(0, 8000);
+      try {
+        const j = JSON.parse(raw) as { metadata?: { vulnerabilities?: Record<string, number> } };
+        const v = j.metadata?.vulnerabilities;
+        if (v) return ok(`npm audit: ${JSON.stringify(v)}`, { exitCode: r.metadata?.exitCode });
+      } catch { /* fallthrough with raw */ }
+      return r.success ? ok(raw.slice(0, 4000)) : fail(`npm audit found issues:\n${raw.slice(0, 4000)}`);
+    }
+    if (fsMod.existsSync(pathMod.join(ws, "requirements.txt")) || fsMod.existsSync(pathMod.join(ws, "pyproject.toml"))) {
+      const r = await execArgs("pip", ["audit"], ws, 120_000);
+      return r.success ? ok((r.output ?? "").slice(0, 4000)) : fail((r.error ?? "pip audit unavailable").slice(0, 2000));
+    }
+    if (fsMod.existsSync(pathMod.join(ws, "Cargo.toml"))) {
+      const r = await execArgs("cargo", ["audit"], ws, 120_000);
+      return r.success ? ok((r.output ?? "").slice(0, 4000)) : fail((r.error ?? "cargo-audit not installed").slice(0, 2000));
+    }
+    return fail("no supported manifest (package.json / requirements / Cargo.toml)");
+  } catch (e) { return fail(String(e)); }
+}
+
+export async function toolFormatCode(ws: string): Promise<ToolResult> {
+  const ran: string[] = [];
+  const failed: string[] = [];
+  const tryRun = async (label: string, cmd: string) => {
+    const r = await execCommand(cmd, { cwd: ws, timeoutMs: 180_000 });
+    if (r.success) ran.push(label);
+    else if (!/not found|command not found|No such/i.test(r.error ?? "")) failed.push(`${label}: ${(r.error ?? "").slice(0, 200)}`);
+  };
+  const profile = detectProjectProfile(ws);
+  if (profile.language === "typescript" || profile.framework) await tryRun("prettier", "npx --yes prettier --write .");
+  if (profile.language === "python") await tryRun("black", "black .");
+  if (profile.language === "go") await tryRun("gofmt", "gofmt -w .");
+  if (profile.language === "rust") await tryRun("cargo-fmt", "cargo fmt");
+  if (ran.length === 0 && failed.length === 0) return fail("no formatter available for this workspace");
+  if (failed.length) return fail(`formatters failed:\n${failed.join("\n")}`);
+  return ok(`formatted with: ${ran.join(", ")}`);
+}
+
+export async function toolLint(ws: string): Promise<ToolResult> {
+  const profile = detectProjectProfile(ws);
+  if (!profile.lintCommand) return fail("no lint command detected for this workspace");
+  const r = await execCommand(profile.lintCommand, { cwd: ws, timeoutMs: 300_000 });
+  return { success: r.success, output: r.output?.slice(0, 8000), error: r.error?.slice(0, 4000), metadata: r.metadata };
+}
+
+export async function toolTypecheck(ws: string): Promise<ToolResult> {
+  const profile = detectProjectProfile(ws);
+  if (!profile.typecheckCommand) return fail("no typecheck command detected for this workspace");
+  const r = await execCommand(profile.typecheckCommand, { cwd: ws, timeoutMs: 300_000 });
+  return { success: r.success, output: r.output?.slice(0, 8000), error: r.error?.slice(0, 4000), metadata: r.metadata };
+}
+
+// ---------- git stash / doctor / quota for the agent ----------
+
+export async function toolGitStash(cwd: string, message?: string): Promise<ToolResult> {
+  return execArgs("git", ["stash", "push", "-m", message || `teleagent-${Date.now()}`], cwd, 60_000);
+}
+
+export async function toolDoctor(): Promise<ToolResult> {
+  try {
+    const { checkHealth } = await import("../observability/health.js");
+    return ok(JSON.stringify(await checkHealth(), null, 2).slice(0, 6000));
+  } catch (e) { return fail(String(e)); }
+}
+
+export async function toolQuotaStatus(userId: string): Promise<ToolResult> {
+  try {
+    const env = getEnv();
+    const used = store.dailyTokens(userId);
+    const totals = store.usageTotals(userId);
+    return ok(JSON.stringify({
+      daily: { used, limit: env.MAX_DAILY_TOKENS, remaining: Math.max(0, env.MAX_DAILY_TOKENS - used) },
+      lifetime: totals.total,
+    }, null, 2));
+  } catch (e) { return fail(String(e)); }
+}

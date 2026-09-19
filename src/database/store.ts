@@ -94,6 +94,13 @@ export const store = {
   getApproval(id: string) {
     return one<{ id: string; run_id: string; tool: string; command: string; risk: string; status: string }>("SELECT * FROM approvals WHERE id = ?", id);
   },
+  resolveApprovalPrefix(prefix: string, status: string): string | null {
+    const rows = all<{ id: string }>("SELECT id FROM approvals WHERE id LIKE ? AND status = 'pending' LIMIT 2", (`${prefix}%`) as SQLInputValue);
+    if (rows.length !== 1) return null;
+    const id = rows[0]?.id as string;
+    getDb().prepare("UPDATE approvals SET status = ? WHERE id = ?").run(status as SQLInputValue, id as SQLInputValue);
+    return id;
+  },
   audit(e: { userId?: string; chatId?: string; sessionId?: string; tool?: string; argsHash?: string; risk?: string; approval?: string; result?: string; exitCode?: number; durationMs?: number }) {
     const id = randomUUID();
     getDb().prepare(
@@ -166,6 +173,25 @@ export const store = {
   },
   getWorkspaceById(id: string) {
     return one("SELECT * FROM workspaces WHERE id = ?", id as SQLInputValue);
+  },
+  latestCheckpoint(workspaceId: string) {
+    return one<{ id: string; run_id: string; git_commit: string | null; files_json: string; created_at: string }>(
+      "SELECT * FROM checkpoints WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1", workspaceId as SQLInputValue,
+    );
+  },
+  toolCallsForRun(runId: string, limit = 30) {
+    return all<{ tool: string; risk: string; approval: string | null; success: number | null; exit_code: number | null; duration_ms: number | null; created_at: string }>(
+      "SELECT tool, risk, approval, success, exit_code, duration_ms, created_at FROM tool_calls WHERE run_id = ? ORDER BY created_at ASC LIMIT ?", runId as SQLInputValue, limit as SQLInputValue,
+    );
+  },
+  lastUserMessage(sessionId: string): string | null {
+    const r = one<{ content: string }>("SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1", sessionId as SQLInputValue);
+    return r?.content ?? null;
+  },
+  lastRunForSession(sessionId: string) {
+    return one<{ id: string; input: string; status: string; started_at: string; finished_at: string | null }>(
+      "SELECT * FROM agent_runs WHERE session_id = ? ORDER BY started_at DESC LIMIT 1", sessionId as SQLInputValue,
+    );
   },
   counts() {
     const c = (t: string): number => (one<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`)?.n ?? 0);

@@ -7,11 +7,12 @@ import { isAuthorized } from "../security/access.js";
 import { checkMessageRate } from "../security/rate-limit.js";
 import { isDuplicateUpdate, markUpdateProcessed } from "../utils/idempotency.js";
 import { resolveWorkspacePath } from "../workspace/manager.js";
-import { startRun, stopRun, ensureSession, interpretControlMessage, sessionRunId } from "../agent/orchestrator.js";
+import { startRun, stopRun, ensureSession, interpretControlMessage, sessionRunId, pauseRun, resumeRun } from "../agent/orchestrator.js";
 import { emptySnapshot, applyEvent, renderStatusMessage, renderFinalSummary, renderFailure } from "./renderer.js";
 import { runControlsKeyboard, approvalKeyboard, afterRunKeyboard, settingsKeyboard, setupKeyboard } from "./keyboards.js";
 import { truncateForTelegram, splitMessage } from "../utils/large-output.js";
 import { validateUploadSize, validateUploadExt, assertSafeArchiveEntry } from "../security/upload-validation.js";
+import { setupBotCommands } from "./commands.js";
 
 const log = () => getLogger();
 
@@ -59,23 +60,10 @@ export function createBot(): Bot {
     await next();
   });
 
-  bot.command("start", async (ctx) => {
-    const userId = ctx.from?.id;
-    if (userId === undefined) return;
-    if (!isAuthorized(userId, ctx.chat?.id).ok) { await ctx.reply("⛔ unauthorized"); return; }
-    await ctx.reply(
-      "🤖 TeleAgent\n\nstatus: ready\n\nsend me anything — I understand natural language. No commands needed.\n\nTry: \"cek kenapa build gagal\" or \"bikin auth yang aman\"",
-      { reply_markup: { inline_keyboard: settingsKeyboard() } },
-    );
-  });
-
-  bot.command("settings", async (ctx) => {
-    await ctx.reply("⚙️ Settings", { reply_markup: { inline_keyboard: settingsKeyboard() } });
-  });
-
-  bot.command("stop", async (ctx) => {
-    await handleControl(ctx, "stop");
-  });
+  // Full slash-command suite: /start /help /status /settings /model /provider
+  // /workspace /new /stop /pause /resume /retry /diff /log /undo /approvals
+  // /approve /reject /usage /doctor /graph (+ natural language still works).
+  setupBotCommands(bot, { runText: (ctx, text) => runAgentForMessage(ctx, text) });
 
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
@@ -181,8 +169,14 @@ async function handleControl(ctx: Context, control: "stop" | "pause" | "resume")
   if (control === "stop") {
     await stopRun(runId);
     await ctx.reply("🛑 cancelled. State persisted — send a message to start something new.");
+  } else if (control === "pause") {
+    (await pauseRun(runId))
+      ? await ctx.reply("⏸ paused. State saved — send `resume` to continue.")
+      : await ctx.reply("no active run (already finished?)");
   } else {
-    await ctx.reply(control === "pause" ? "⏸ paused. State saved." : "▶️ resumed.");
+    (await resumeRun(runId))
+      ? await ctx.reply("▶️ resumed.")
+      : await ctx.reply("no paused run found.");
   }
 }
 
