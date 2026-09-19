@@ -20,6 +20,7 @@ import {
 import { rememberFailure, markFailureResolved, failureHints, fingerprintError } from "../agent/failure-memory.js";
 import { detectProjectProfile } from "../workspace/manager.js";
 import { gitTools } from "../tools/git.js";
+import { buildGraph, isTestEnv } from "../integrations/graphify.js";
 import type { AgentContext, AgentEvent, AgentRuntime } from "./types.js";
 import type { ChatMessage } from "../providers/types.js";
 
@@ -337,6 +338,7 @@ export class NativeRuntime implements AgentRuntime {
         }
         recordRunDuration(Date.now() - started);
         yield { type: "progress", percent: 100, label: "completed" };
+        this.autoRefreshGraph(filesChanged);
         done = true;
         break;
       }
@@ -517,7 +519,25 @@ export class NativeRuntime implements AgentRuntime {
         (checkpointId ? ` Checkpoint: ${checkpointId.slice(0, 8)}.` : "") +
         (report.failed > 0 ? ` ⚠️ verification: ${report.failed} check(s) still failing — task is NOT verified.` : "");
       yield { type: "completed", summary: budgetNote + (await gitStat()), filesChanged, testsPassed: report.passed };
+      this.autoRefreshGraph(filesChanged);
     }
+  }
+
+  /**
+   * Fire-and-forget knowledge-graph refresh after files changed.
+   * Update-only (fast, offline). Never blocks completion, never throws,
+   * skipped in tests. On Termux the graphify layer skips by itself.
+   */
+  private autoRefreshGraph(filesChanged: string[]): void {
+    if (filesChanged.length === 0 || this.aborted) return;
+    if (isTestEnv()) return;
+    try {
+      void buildGraph(this.ctx.workspacePath, true, 120_000)
+        .then((r) => {
+          if (!r.success) getLogger().warn({ event: "graph.auto-refresh.failed", err: (r.error ?? "").slice(0, 200) }, "graph auto-refresh failed");
+        })
+        .catch(() => { /* never break the run */ });
+    } catch { /* never break the run */ }
   }
 
   private async waitForApproval(approvalId: string, timeoutMs: number): Promise<boolean> {

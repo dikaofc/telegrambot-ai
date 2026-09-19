@@ -387,6 +387,21 @@ export async function buildApiServer() {
     const { buildGraph } = await import("../integrations/graphify.js");
     return buildGraph(ws, Boolean(body.updateOnly));
   });
+  // Refresh graphs for every workspace (update-only, best-effort per workspace).
+  // On Termux each build is honestly skipped by the graphify layer.
+  app.post("/api/graphify/refresh-all", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const { buildGraph } = await import("../integrations/graphify.js");
+    const out: Record<string, { ok: boolean; detail: string }> = {};
+    for (const n of listWorkspaces()) {
+      try {
+        const wsPath = resolveWorkspacePath(n);
+        const r = await buildGraph(wsPath, true, 180_000);
+        out[n] = { ok: r.success, detail: (r.output ?? r.error ?? "").slice(-300) };
+      } catch (e) { out[n] = { ok: false, detail: String(e).slice(0, 300) }; }
+    }
+    return { refreshed: out };
+  });
   app.post("/api/graphify/query", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const body = (req.body ?? {}) as { workspace?: string; question?: string };

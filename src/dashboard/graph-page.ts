@@ -32,6 +32,7 @@ canvas#g-canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2p
 
 /* toolbar floating over the canvas */
 .gtools{position:absolute;left:10px;top:10px;right:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;pointer-events:none}
+.gtools .btn{font-size:12.5px;padding:0 10px}
 .gtools > *{pointer-events:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-xs);box-shadow:var(--shadow-1)}
 .gsearch{display:flex;align-items:center;gap:6px;padding:0 8px;height:34px;flex:1 1 220px;max-width:340px}
 .gsearch input{height:30px;border:0;background:transparent;font-size:13px;padding:0}
@@ -77,6 +78,7 @@ canvas#g-canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2p
 /* ---------- embed mode (inside the dashboard Graphify tab) ---------- */
 .embed .ghead{display:none}
 .embed .gwrap{height:100dvh}
+.embed .gtools{top:8px}
 
 /* ---------- tablet ---------- */
 @media (max-width:1000px){
@@ -87,10 +89,10 @@ canvas#g-canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2p
 @media (max-width:760px){
   .gwrap{flex-direction:column}
   .gmain{flex:1 1 auto}
-  .gtools{top:8px;left:8px;right:8px;gap:5px}
-  .gsearch{flex:1 1 100%;max-width:none;order:-1}
+  .gtools{top:8px;left:8px;right:8px;gap:5px;flex-wrap:nowrap}
+  .gsearch{flex:1 1 130px;min-width:110px;max-width:none}
   .gstat{bottom:8px;left:8px;right:8px}
-  .rail{position:fixed;left:0;right:0;bottom:0;width:auto;flex:0 0 auto;height:58dvh;max-height:58dvh;border-left:0;border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:var(--shadow-2);transform:translateY(calc(100% - 44px));transition:transform .22s cubic-bezier(.22,.61,.36,1);z-index:30}
+  .rail{position:fixed;left:0;right:0;bottom:0;width:auto;flex:0 0 auto;height:58dvh;max-height:58dvh;border-left:0;border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:var(--shadow-2);transform:translateY(calc(100% - 48px));transition:transform .22s cubic-bezier(.22,.61,.36,1);z-index:30}
   .rail.open{transform:none}
   .railhead{cursor:pointer;padding-top:6px;padding-bottom:6px}
   .railhead::before{content:"";position:absolute;left:50%;top:6px;width:34px;height:4px;margin-left:-17px;border-radius:99px;background:var(--line-strong)}
@@ -116,7 +118,7 @@ if(EMBED)document.documentElement.className='embed';
 /* ---------- state ---------- */
 var PAY=null;               // payload from /api/graphify/view
 var X=null,Y=null,VX=null,VY=null,DRAG=null;  // typed arrays, index-aligned with nodes
-var LK=null;                // Int32Array pairs of indices
+var LK=null;                // Int32Array [from,to,from,to,…] index pairs
 var NB=[];                  // adjacency: index -> array of {to,rel}
 var ADJ=null;               // Uint8Array visibility per node
 var selected=-1,hovering=-1;
@@ -163,16 +165,16 @@ function seedLayout(){
       X[i]=cx+Math.cos(a)*d;Y[i]=cy+Math.sin(a)*d;VX[i]=0;VY[i]=0;
     });
   });
-  var idx=new Map();PAY.nodes.forEach(function(nd,i){idx.set(nd.id,i)});
+  // links arrive as [fromIndex, toIndex, relation] over PAY.nodes
   var pairs=[];
-  PAY.links.forEach(function(l){
-    var a=idx.get(l.source),b=idx.get(l.target);
-    if(a==null||b==null||a===b)return;
+  NB=PAY.nodes.map(function(){return []});
+  (PAY.links||[]).forEach(function(l){
+    var a=l[0],b=l[1];
+    if(a===b||a<0||b<0||a>=PAY.nodes.length||b>=PAY.nodes.length)return;
     pairs.push(a,b);
+    NB[a].push({to:b,rel:l[2]});NB[b].push({to:a,rel:l[2]});
   });
   LK=Int32Array.from(pairs);
-  NB=PAY.nodes.map(function(){return []});
-  for(var p=0;p<LK.length;p+=2){NB[LK[p]].push({to:LK[p+1]});NB[LK[p+1]].push({to:LK[p]})}
   ADJ=new Uint8Array(n).fill(1);
   applyVisibility();
 }
@@ -281,7 +283,7 @@ function draw(){
     var a=LK[p],b=LK[p+1];
     if(!visible(a)||!visible(b))continue;
     var hot=focusSet&&(focusSet.has(a)&&focusSet.has(b));
-    if(focusSet&&!hot){ctx.strokeStyle=focusSet?line:muted;ctx.globalAlpha=0.12}else{ctx.strokeStyle=line;ctx.globalAlpha=0.5}
+    if(focusSet&&!hot){ctx.strokeStyle=muted;ctx.globalAlpha=0.12}else{ctx.strokeStyle=line;ctx.globalAlpha=0.5}
     ctx.beginPath();ctx.moveTo(px(a),py(a));ctx.lineTo(px(b),py(b));ctx.stroke();
   }
   ctx.globalAlpha=1;
@@ -340,8 +342,8 @@ function renderDetail(){
   }
   var nd=PAY.nodes[selected],ci=commIndex(nd.community),comm=ci>=0?PAY.communities[ci]:null;
   var commColor=ci>=0&&palette[ci]?palette[ci].fill:'#8a90a4';
-  var nbs=NB[selected].map(function(nb){return nb.to}).filter(function(i){return visible(i)})
-    .sort(function(a,b){return PAY.nodes[b].degree-PAY.nodes[a].degree}).slice(0,24);
+  var nbs=NB[selected].filter(function(nb){return visible(nb.to)})
+    .sort(function(a,b){return PAY.nodes[b.to].degree-PAY.nodes[a.to].degree}).slice(0,24);
   box.innerHTML='<div class="nodehead"><span class="label">'+esc(nd.label)+'</span>'+'<span class="bdg acc">'+esc(nd.fileType)+'</span></div>'
     +'<div class="kv" style="margin-top:8px">'
     +'<div><div class="k">komunitas</div><div class="v">'+(comm?'<span class="swatch" style="display:inline-block;vertical-align:middle;margin-right:6px;background:'+commColor+'"></span>'+esc(comm.name):'—')+'</div></div>'
@@ -349,7 +351,7 @@ function renderDetail(){
     +(nd.sourceFile?'<div><div class="k">sumber</div><div class="v"><code>'+esc(nd.sourceFile)+(nd.sourceLocation?':'+esc(nd.sourceLocation):'')+'</code></div></div>':'')
     +'</div>'
     +(nbs.length?'<h3 style="margin-top:14px">Tetangga <span class="hint">'+NB[selected].length+' total</span></h3><div class="nblist">'
-      +nbs.map(function(i){return '<button class="nb" data-node="'+i+'" type="button"><span>'+esc(PAY.nodes[i].label)+'</span><span class="rel">'+PAY.nodes[i].degree+'</span></button>'}).join('')
+      +nbs.map(function(nb){return '<button class="nb" data-node="'+nb.to+'" type="button"><span>'+esc(PAY.nodes[nb.to].label)+'</span><span class="rel">'+esc(nb.rel||'')+'</span></button>'}).join('')
       +'</div>':'<div class="empty" style="margin-top:12px">Node tanpa link</div>');
 }
 function renderCommunities(){
@@ -670,10 +672,10 @@ ${GRAPH_CSS}
   <div class="gmain">
     <canvas id="g-canvas" tabindex="0" role="img" aria-label="Graf pengetahuan workspace: node dan relasi"></canvas>
     <div class="gtools">
-      <div class="gsearch"><span class="sr">Cari node</span><input id="g-search" type="search" placeholder="Cari node… (/)"></div>
-      <button class="btn" id="g-fit" type="button">Fit</button>
-      <button class="btn" id="g-relayout" type="button">Ulangi layout</button>
-      <button class="btn" id="g-reload" type="button">Muat ulang data</button>
+      <div class="gsearch"><label class="sr" for="g-search">Cari node</label><input id="g-search" type="search" placeholder="Cari node…  /" autocomplete="off"></div>
+      <button class="btn" id="g-fit" type="button" title="Sesuaikan tampilan ke seluruh graph">Fit</button>
+      <button class="btn" id="g-relayout" type="button" title="Hitung ulang posisi node">Layout</button>
+      <button class="btn" id="g-reload" type="button" title="Ambil ulang data graph.json">Data</button>
       <button class="btn icon" id="g-close" type="button" title="Buka panel detail" aria-label="Buka panel detail">
         <svg width="15" height="15" viewBox="0 0 15 15" aria-hidden="true" focusable="false"><path d="M1 3h13M1 7.5h13M1 12h13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>
       </button>

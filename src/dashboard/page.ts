@@ -69,10 +69,11 @@ export const BASE_CSS = `
 /* ---------- tokens: light first, dark follows the system ---------- */
 :root{
   --bg:#f4f5f9; --surface:#ffffff; --surface-2:#f7f8fc; --surface-3:#eef0f7;
-  --text:#12162a; --muted:#5d6480; --line:#e4e7f0; --line-strong:#d3d7e4;
-  --accent:#4f46e5; --accent-ink:#ffffff; --accent-soft:#eef0ff;
-  --ok:#0f9d58; --ok-soft:#e6f6ee; --warn:#b57900; --warn-soft:#fdf3e2;
-  --bad:#d92d20; --bad-soft:#fdeceb; --info:#0b7285; --info-soft:#e6f4f7;
+  --text:#12162a; --muted:#5b6280; --line:#e4e7f0; --line-strong:#d3d7e4;
+  /* deep teal, not the default violet every generated dashboard reaches for */
+  --accent:#0e7490; --accent-ink:#ffffff; --accent-soft:#e3f1f4;
+  --ok:#0f7f4c; --ok-soft:#e7f5ee; --warn:#9c6309; --warn-soft:#fdf3e4;
+  --bad:#c5382c; --bad-soft:#fdeceb; --info:#4c5ea8; --info-soft:#eceffb;
   --radius:14px; --radius-sm:10px; --radius-xs:8px;
   --shadow-1:0 1px 2px rgba(18,22,42,.05), 0 1px 1px rgba(18,22,42,.04);
   --shadow-2:0 1px 2px rgba(18,22,42,.05), 0 12px 28px -18px rgba(18,22,42,.35);
@@ -84,9 +85,9 @@ export const BASE_CSS = `
   :root:not([data-theme="light"]){
     --bg:#0b0e14; --surface:#12161f; --surface-2:#171c27; --surface-3:#1d2330;
     --text:#eaeefb; --muted:#98a2bd; --line:#232a39; --line-strong:#2e374a;
-    --accent:#8b8dff; --accent-ink:#0b0e14; --accent-soft:#1a1f31;
-    --ok:#3ecf8e; --ok-soft:#122b22; --warn:#e2b13c; --warn-soft:#2b2411;
-    --bad:#ff6b6b; --bad-soft:#2c1618; --info:#5ac8e0; --info-soft:#122830;
+    --accent:#5cc8dd; --accent-ink:#08161a; --accent-soft:#122b31;
+    --ok:#4ecf92; --ok-soft:#12291f; --warn:#e0b45c; --warn-soft:#2a2313;
+    --bad:#f0736b; --bad-soft:#2c1718; --info:#9aa8e6; --info-soft:#181d31;
     --shadow-1:0 1px 2px rgba(0,0,0,.4);
     --shadow-2:0 1px 2px rgba(0,0,0,.4), 0 18px 36px -22px rgba(0,0,0,.75);
   }
@@ -94,9 +95,9 @@ export const BASE_CSS = `
 :root[data-theme="dark"]{
   --bg:#0b0e14; --surface:#12161f; --surface-2:#171c27; --surface-3:#1d2330;
   --text:#eaeefb; --muted:#98a2bd; --line:#232a39; --line-strong:#2e374a;
-  --accent:#8b8dff; --accent-ink:#0b0e14; --accent-soft:#1a1f31;
-  --ok:#3ecf8e; --ok-soft:#122b22; --warn:#e2b13c; --warn-soft:#2b2411;
-  --bad:#ff6b6b; --bad-soft:#2c1618; --info:#5ac8e0; --info-soft:#122830;
+  --accent:#5cc8dd; --accent-ink:#08161a; --accent-soft:#122b31;
+  --ok:#4ecf92; --ok-soft:#12291f; --warn:#e0b45c; --warn-soft:#2a2313;
+  --bad:#f0736b; --bad-soft:#2c1718; --info:#9aa8e6; --info-soft:#181d31;
   --shadow-1:0 1px 2px rgba(0,0,0,.4);
   --shadow-2:0 1px 2px rgba(0,0,0,.4), 0 18px 36px -22px rgba(0,0,0,.75);
 }
@@ -201,7 +202,7 @@ pre{background:var(--surface-2);border:1px solid var(--line);border-radius:var(-
 .tree{display:flex;flex-wrap:wrap;gap:5px;max-height:300px;overflow:auto}
 .chip{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:3px 9px;white-space:nowrap;color:var(--muted)}
 .chip.dir{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,var(--line))}
-.empty{color:var(--muted);font-size:13.5px;padding:14px;background:var(--surface-2);border:1px dashed var(--line-strong);border-radius:var(--radius-sm);text-align:center}
+.empty{color:var(--muted);font-size:13.5px;padding:13px 14px;background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--line-strong);border-radius:var(--radius-xs);text-align:left;line-height:1.55}
 .alert{display:flex;gap:10px;align-items:flex-start;border-radius:var(--radius-sm);padding:12px;font-size:13.5px;background:var(--bad-soft);color:var(--bad)}
 .alert.warn{background:var(--warn-soft);color:var(--warn)}
 .alert.info{background:var(--info-soft);color:var(--info)}
@@ -297,6 +298,8 @@ function pushPath(p){try{if(typeof history!=="undefined"&&history.pushState)hist
 
 /* ---------- theme: follows the system unless overridden ---------- */
 function storedTheme(){try{return localStorage.getItem("teleagent_theme")||""}catch(e){return ""}}
+const SUN_ICON='<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 .8v1.9M8 13.3v1.9M.8 8h1.9M13.3 8h1.9M2.9 2.9l1.3 1.3M11.8 11.8l1.3 1.3M13.1 2.9l-1.3 1.3M4.2 11.8l-1.3 1.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>';
+const MOON_ICON='<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.4 10.1A5.8 5.8 0 0 1 5.9 2.6 5.9 5.9 0 1 0 13.4 10.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>';
 function applyTheme(t){
   try{
     const root=document.documentElement;
@@ -305,7 +308,7 @@ function applyTheme(t){
   }catch(e){}
   try{
     const b=document.querySelector&&document.querySelector('[data-action="theme"]');
-    if(b&&b.textContent!==undefined)b.textContent=t==="dark"?"☀":"◐";
+    if(b&&b.innerHTML!==undefined)b.innerHTML=(t==="dark"?SUN_ICON:MOON_ICON);
   }catch(e){}
 }
 function toggleTheme(){
@@ -461,8 +464,8 @@ Graphify:async v=>{
   v.innerHTML='<section class="panel"><h3>Knowledge Graph</h3><div class="row"><label for="g-ws">workspace</label><select id="g-ws" style="max-width:220px">'+opts+'</select></div>'
   +'<div class="row" style="margin-top:10px"><button class="btn" data-action="g-status">Status</button><button class="btn primary" data-action="g-build">Build</button><button class="btn" data-action="g-update">Update</button><button class="btn" data-action="g-preview">Preview</button></div>'
   +'<pre id="g-out" style="margin-top:12px">Pilih workspace lalu cek status.</pre></section>'
-  +'<section class="panel"><h3>Preview</h3><div class="frame"><iframe id="g-frame" src="about:blank" title="graph preview"></iframe></div>'
-  +'<div class="row" style="margin-top:10px"><button class="btn" data-action="g-preview">Refresh preview</button><a class="btn" id="g-open" href="#" target="_blank" rel="noopener">Open full</a></div><div id="g-preview-msg" class="sub" style="margin-top:8px"></div></section>'
+  +'<section class="panel"><h3>Graph <span class="hint">viewer TeleAgent · data graph.json asli</span></h3><div class="frame"><iframe id="g-frame" src="about:blank" title="Graph workspace" loading="lazy"></iframe></div>'
+  +'<div class="row" style="margin-top:10px"><button class="btn" data-action="g-preview">Muat ulang viewer</button><a class="btn" id="g-open" href="#" target="_blank" rel="noopener">Buka layar penuh</a><a class="btn" id="g-raw" href="#" target="_blank" rel="noopener">Output asli graphify</a></div><div id="g-preview-msg" class="sub" style="margin-top:8px"></div></section>'
   +'<section class="panel"><h3>Report <span class="hint">GRAPH_REPORT.md</span></h3><pre id="g-report">Belum ada report — build dulu.</pre></section>'
   +'<section class="panel"><h3>Query</h3><div class="fld"><label for="g-q">pertanyaan / simbol</label><input id="g-q" placeholder="what connects auth to database?"></div>'
   +'<div class="row" style="margin-top:10px"><button class="btn primary" data-action="g-query">Query</button><button class="btn" data-action="g-explain">Explain symbol</button></div>'
@@ -549,11 +552,12 @@ async function gBuild(updateOnly){
 }
 async function gPreview(){
   const ws=wsValue();
-  const frame=$("g-frame"),msg=$("g-preview-msg"),open=$("g-open"),report=$("g-report");
-  const url="/api/graphify/html?workspace="+encodeURIComponent(ws);
-  if(frame)frame.src=url;
-  if(open)open.href=url;
-  if(msg)msg.textContent="Memuat preview...";
+  const frame=$("g-frame"),msg=$("g-preview-msg"),open=$("g-open"),raw=$("g-raw"),report=$("g-report");
+  const q="?workspace="+encodeURIComponent(ws);
+  if(frame)frame.src="/api/graphify/html"+q+"&embed=1";
+  if(open)open.href="/api/graphify/html"+q;
+  if(raw)raw.href="/api/graphify/raw"+q;
+  if(msg)msg.textContent="Memuat viewer...";
   try{
     const rep=await api("/api/graphify/report?workspace="+encodeURIComponent(ws));
     if(report)report.textContent=String(rep.report||"").slice(0,12000);
@@ -601,6 +605,19 @@ function saveKey(){try{localStorage.setItem("teleagent_key",$("apiKey").value)}c
 /* ---------- bindings ---------- */
 function bind(id,evt,fn){try{const el=$(id);if(el&&el.addEventListener)el.addEventListener(evt,fn)}catch(e){}}
 function schedule(fn,ms){try{return setTimeout(fn,ms)}catch(e){return 0}}
+function onKeys(ev){
+  try{
+    if(!ev||ev.ctrlKey||ev.metaKey||ev.altKey)return;
+    const t=ev.target||{};
+    const tag=String(t.tagName||"").toUpperCase();
+    if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"||t.isContentEditable)return;
+    if(ev.key!=="ArrowRight"&&ev.key!=="ArrowLeft")return;
+    const i=TABS.indexOf(cur);
+    const n=ev.key==="ArrowRight"?(i+1)%TABS.length:(i-1+TABS.length)%TABS.length;
+    go(TABS[n]);
+    if(ev.preventDefault)ev.preventDefault();
+  }catch(e){}
+}
 function onEvent(ev){
   const tgt=ev&&ev.target;
   const closest=tgt&&tgt.closest?function(sel){return tgt.closest(sel)}:function(){return null};
@@ -637,6 +654,7 @@ try{if($("apiKey"))$("apiKey").value=key()}catch(e){}
 try{if(typeof document!=="undefined"&&document.addEventListener){document.addEventListener("click",onEvent)} }catch(e){}
 try{if(typeof window!=="undefined"&&window.addEventListener){window.addEventListener("popstate",function(){const t=tabFromPath(location.pathname);if(t!==cur){cur=t;setTitle();refresh()}})} }catch(e){}
 try{if(typeof document!=="undefined"&&document.addEventListener){document.addEventListener("visibilitychange",function(){if(!document.hidden)refresh()})} }catch(e){}
+try{if(typeof document!=="undefined"&&document.addEventListener){document.addEventListener("keydown",onKeys)} }catch(e){}
 renderTabs();
 refresh();
 try{setInterval(function(){try{if(typeof document!=="undefined"&&document.hidden)return}catch(e){}if(cur==="Approvals"||cur==="Runs"||cur==="Status")refresh()},15000)}catch(e){}
@@ -677,7 +695,9 @@ ${BASE_CSS}
       <input id="apiKey" type="password" placeholder="API key" aria-label="API key" autocomplete="off">
       <button class="btn" data-action="save-key" type="button">Save</button>
       <button class="btn" data-action="refresh" type="button">Refresh</button>
-      <button class="btn icon" data-action="theme" type="button" title="Ganti tema" aria-label="Ganti tema">◐</button>
+      <button class="btn icon" data-action="theme" type="button" title="Ganti tema" aria-label="Ganti tema">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.4 10.1A5.8 5.8 0 0 1 5.9 2.6 5.9 5.9 0 1 0 13.4 10.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      </button>
     </div>
   </header>
   <nav id="tabs" class="tabs" role="tablist" aria-label="Bagian dashboard"></nav>

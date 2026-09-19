@@ -50,6 +50,8 @@ Workflow wajib sebelum mengubah kode:
 2. `graphify_query "apa yang menghubungkan X ke Y?"` / `graphify_path A B` / `graphify_explain Simbol` — temukan file yang relevan.
 3. Baru `read_file` pada file yang ditunjuk graph.
 4. Graph usang setelah refactor besar? `graphify_build` (atau `POST /api/graphify/build`) — offline, tanpa LLM.
+5. Graph di-refresh otomatis tiap run yang mengubah file (update-only, background). Semua workspace sekaligus? `POST /api/graphify/refresh-all`.
+6. CLI belum ada? TeleAgent **auto-install** (`uv → pipx → pip`) saat pertama dipakai. **Termux/Android**: graphify tidak didukung — build dilewati otomatis, sisanya tetap jalan.
 
 > Symlink `workspaces/default/telegrambot-ai` membuat semua perubahan project otomatis terlihat dari workspace `default`. Jangan pernah meng-copy repo ke dalam `workspaces/` — copy-an akan divergen (sudah pernah kejadian).
 
@@ -250,7 +252,9 @@ Full `.env` lihat `cp .env.example .env` — ada komentar cara pakai tiap provid
 - **Usage** — token harian/sisa kuota + lifetime cost (estimated, tercatat per-run beneran)
 - **Audit** — log tool, risk, approval, exit, durasi (secret udah di-redact)
 - **Settings** — simpan setting; secret (`*token*`, `*key*`, `*secret*`) ditolak 403 — cuma via `.env`
-- **Graphify** — status/build/query/path/explain langsung dari dashboard
+- **Graphify** — status/build/query/path/explain + viewer graph sendiri (canvas, cari node, filter komunitas, insiden dari analisis graphify)
+
+Setiap tab punya **path sendiri** (`/`, `/diagram`, `/sessions`, `/runs`, `/approvals`, `/workspaces`, `/providers`, `/usage`, `/audit`, `/settings`, `/graphify`) — deep link, refresh, dan tombol back/forward browser jalan. URL lain yang diminta dengan `Accept: text/html` balik ke shell dashboard; path `/api/*` tetap `404` JSON. Semua halaman (dashboard + viewer graph) pakai satu stylesheet `src/dashboard/page.ts` — token, tombol, tabel, breakpoint, dan mode gelap tidak bisa beda antar halaman.
 
 TUI command: `status | sessions [n] | runs [sid] | stop <id> | approvals | approve <id> | reject <id> | usage | audit | workspaces | providers | graphify <ws> | settings | set <k> <v> | metrics | doctor | help | quit`
 
@@ -269,6 +273,15 @@ Indexing code **100% lokal** (tree-sitter, gak pakai LLM, gak keluar mesin). Age
 `graphify_status` → kalau belum ada graph → `graphify_build` (offline) → `graphify_query / path / explain`.
 
 Kalau CLI belum ada, tool graph jujur balikin instruksi install + agent fallback ke `search_code`/`grep`. Dashboard tab Graphify & `npm run tui → graphify <ws>` nunjukin status yang sama.
+
+**Viewer graph** (`/api/graphify/html`, dirender ulang dari `graph.json` lewat `GET /api/graphify/view`):
+
+- Responsif sampai layar HP — panel detail jadi bottom sheet, tabel/panel tidak perlu digeser horizontal, toolbar tetap satu baris.
+- **Tanpa CDN**: `graph.html` bawaan CLI narik `vis-network` dari unpkg; viewer ini nol request eksternal, jalan offline.
+- Layout deterministik (posisi awal dari hash workspace + seed tetap) lalu simulasi mendingin sendiri; `prefers-reduced-motion` → layout dihitung sekalian, tanpa animasi.
+- Degree dihitung dari link asli, komunitas + insight (`gods`, `surprises`, `questions`, cohesion) diambil dari `.graphify_analysis.json` — tidak ada angka yang dipalsukan.
+- Node dibatasi (`limit`, default 400) dan edge cuma yang kedua ujungnya tampil; kalau terpotong, halaman bilang terus terang. Payload ±108KB untuk 776 node (1944 edge) karena edge dikirim sebagai pasangan indeks, bukan id panjang.
+- Output asli CLI tetap ada di `GET /api/graphify/raw?workspace=…` (tombol "Output asli graphify") — tidak ada fitur yang hilang.
 
 ---
 
@@ -315,7 +328,8 @@ Agent Orchestrator ──→ Providers (9Router/openai/xAI/Anthropic/ollama/cust
 - `GET /` dashboard • `GET /api/status` (public) • `GET /health /ready /metrics`
 - `GET /api/sessions /api/runs /api/approvals/pending /api/workspaces /api/providers /api/usage /api/audit /api/settings /api/memory`
 - `POST /api/settings` (secret ditolak 403) • `POST /api/approvals/:id` • `POST /api/runs/:id/stop`
-- `POST /api/graphify/build|query|path|explain` • `GET /api/graphify/status|html|report` • `GET /api/diagram`
+- `POST /api/graphify/build|query|path|explain` • `GET /api/graphify/status|report` • `GET /api/diagram`
+- `GET /api/graphify/html` (shell viewer, boleh dibuka di iframe) • `GET /api/graphify/view?workspace=&limit=` (data graph asli, gated) • `GET /api/graphify/raw` (output asli graphify CLI, gated)
 - `POST /v1/sessions` • `GET /v1/sessions[/:id]` • `POST /v1/sessions/:id/messages|stop|pause|resume`
 - `GET /v1/workspaces` • `POST /v1/workspaces` • `GET /v1/providers` • `GET /v1/models`
 - `GET /v1/runs/:id` (run + tool calls) • `GET /v1/runs/:id/events`
@@ -371,7 +385,8 @@ npm run dev
 | **Secret** | `.env`, `.ssh`, `credentials`, SSH key → `protected` (gak masuk LLM context); audit log `api_key=********` |
 | **Isolation** | per-user `chat → session → workspace → sandbox`, filesystem boundary, `HOME/PATH/WORKSPACE/TEMP` terkontrol, CPU/RAM/pids limit di Docker |
 | **Auth** | `BOT_ACCESS_MODE=owner|private|public|allowlist` + `OWNER_IDS`/`ALLOWED_*` — dicek di tiap handler, bukan cuma Telegram |
-| **API exposure** | `HOST` default `127.0.0.1` — tanpa `TELEAGENT_API_KEY`, semua endpoint mutasi (approval, settings, provider config, stop run) cuma dari localhost |
+| **API exposure** | `HOST` default `127.0.0.1` — tanpa `TELEAGENT_API_KEY`, semua endpoint mutasi (approval, settings, provider config, stop run) cuma dari localhost. Shell HTML dashboard & viewer graph boleh publik karena tidak bawa data workspace — datanya tetap dari endpoint gated |
+| **XSS** | Semua rendering dashboard/viewer escape nilai dari DB & workspace (`esc()`); viewer tidak pernah menyisipkan HTML mentah |
 | **Workspace boundary** | nama workspace gak bisa kabur: `../..`, path absolut, & symlink keluar `WORKSPACE_ROOT` → ditolak |
 | **Rate & cost** | `messages/min`, `runs/hour`, `tokens/day`, concurrency `MAX_CONCURRENT_RUNS` |
 

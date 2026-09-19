@@ -9,6 +9,23 @@ const execFileAsync = promisify(execFile);
 export const GRAPHIFY_BIN = process.env.GRAPHIFY_BIN ?? "graphify";
 export const GRAPHIFY_OUT_DIR = "graphify-out";
 
+function bin(): string {
+  return process.env.GRAPHIFY_BIN ?? GRAPHIFY_BIN;
+}
+
+/** True on Android Termux (no graphify wheels, no compiler toolchain). Override for tests. */
+export function isTermuxPlatform(env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    if ((env.ANDROID_ROOT ?? "").includes("com.termux")) return true;
+    if ((env.PREFIX ?? "").includes("com.termux")) return true;
+  } catch { /* noop */ }
+  return false;
+}
+
+export function isTestEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VITEST === "true" || env.NODE_ENV === "test";
+}
+
 let availabilityCache: { at: number; ok: boolean; version?: string } | null = null;
 
 /** Check the real `graphify` CLI (Python, PyPI `graphifyy`). Cached 60s. */
@@ -17,7 +34,7 @@ export async function graphifyAvailable(): Promise<{ ok: boolean; version?: stri
     return { ok: availabilityCache.ok, version: availabilityCache.version };
   }
   try {
-    const { stdout } = await execFileAsync(GRAPHIFY_BIN, ["--version"], { timeout: 15_000 });
+    const { stdout } = await execFileAsync(bin(), ["--version"], { timeout: 15_000 });
     availabilityCache = { at: Date.now(), ok: true, version: String(stdout).trim().slice(0, 100) };
   } catch {
     availabilityCache = { at: Date.now(), ok: false };
@@ -26,6 +43,44 @@ export async function graphifyAvailable(): Promise<{ ok: boolean; version?: stri
 }
 
 export function resetGraphifyCache(): void { availabilityCache = null; }
+
+export interface EnsureResult { ok: boolean; version?: string; installed?: boolean; skipped?: "termux" | "test" | "failed"; detail?: string; }
+
+let installPromise: Promise<EnsureResult> | null = null;
+
+/**
+ * Ensure the graphify CLI exists, installing it automatically when missing.
+ * - Termux/Android: skipped honestly (no wheels/toolchain) — caller must skip build.
+ * - Test env: never installs (no network side effects in tests).
+ * - Concurrent callers share one install attempt.
+ */
+export function ensureGraphify(): Promise<EnsureResult> {
+  if (!installPromise) installPromise = doEnsure().finally(() => { installPromise = null; });
+  return installPromise;
+}
+
+async function doEnsure(): Promise<EnsureResult> {
+  // Platform gate first: on Termux we skip even if a stray binary exists.
+  if (isTermuxPlatform()) return { ok: false, skipped: "termux", detail: "graphify tidak didukung di Termux/Android — build graph dilewati" };
+  const avail = await graphifyAvailable();
+  if (avail.ok) return { ok: true, version: avail.version };
+  if (isTestEnv()) return { ok: false, skipped: "test", detail: "auto-install disabled in test env" };
+  const installers: Array<{ cmd: string; args: string[] }> = [
+    { cmd: "uv", args: ["tool", "install", "graphifyy"] },
+    { cmd: "pipx", args: ["install", "graphifyy"] },
+    { cmd: "pip", args: ["install", "--user", "graphifyy"] },
+  ];
+  for (const ins of installers) {
+    try {
+      await execFileAsync(ins.cmd, ins.args, { timeout: 180_000 });
+      resetGraphifyCache();
+      const recheck = await graphifyAvailable();
+      if (recheck.ok) return { ok: true, version: recheck.version, installed: true, detail: `installed via ${ins.cmd}` };
+    } catch { /* try next installer */ }
+  }
+  resetGraphifyCache();
+  return { ok: false, skipped: "failed", detail: installHint() };
+}
 
 /* ------------------------------------------------------------------ *
  * First-party viewer data. The `graphify` CLI writes graph.json plus a
@@ -67,13 +122,22 @@ function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
 }
 
+/**
+ * Wire shape for the viewer. Kept deliberately lean: community names are sent
+ * once in `communities` instead of on every node, and edges carry only what the
+ * viewer draws (a phone should never have to download a megabyte to look at a
+ * graph).
+ */
 export interface GraphViewNode {
-  id: string; label: string; community: number; communityName: string;
+  id: string; label: string; community: number;
   fileType: string; sourceFile?: string; sourceLocation?: string; degree: number;
 }
-export interface GraphViewLink {
-  source: string; target: string; relation: string; confidence?: string; weight: number;
-}
+/**
+ * `[fromIndex, toIndex, relation]` into `nodes`. Index form instead of repeating
+ * two long node ids per edge: a 2k-edge graph drops from ~250KB to ~90KB, which
+ * is the difference between instant and sluggish on a phone.
+ */
+export type GraphViewLink = [from: number, to: number, relation: string];
 export interface GraphViewCommunity { id: number; name: string; count: number; cohesion?: number }
 
 export interface GraphViewPayload {
@@ -100,6 +164,8 @@ export interface GraphViewPayload {
  * Read the real graphify output and shape it for the viewer.
  * Node degree is computed from the links (graphify only adds it when drawing),
  * and the heaviest nodes are kept so a phone never has to lay out 800 nodes.
+ * Edges are index pairs over `nodes`, and only edges whose both ends survive
+ * the node ceiling are returned — the payload never references a missing node.
  */
 export function graphView(workspacePath: string, opts: { limit?: number } = {}): GraphViewPayload {
   const graphPath = path.join(outDir(workspacePath), "graph.json");
@@ -123,16 +189,17 @@ export function graphView(workspacePath: string, opts: { limit?: number } = {}):
 
   // degree from the links, and community membership from the nodes
   const degree = new Map<string, number>();
-  const links: GraphViewLink[] = [];
+  const edges: Array<{ from: string; to: string; relation: string }> = [];
   for (const l of rawLinks) {
     const source = str(l.source), target = str(l.target);
     if (!source || !target) continue;
     degree.set(source, (degree.get(source) ?? 0) + 1);
     if (target !== source) degree.set(target, (degree.get(target) ?? 0) + 1);
-    links.push({ source, target, relation: str(l.relation, "related"), confidence: str(l.confidence) || undefined, weight: num(l.weight, 1) });
+    edges.push({ from: source, to: target, relation: str(l.relation, "related") });
   }
 
   const communityCount = new Map<number, number>();
+  // internal: keeps the display name for the community list, dropped from `nodes`
   const allNodes = rawNodes.map((n) => {
     const id = str(n.id);
     const community = num(n.community, -1);
@@ -146,19 +213,29 @@ export function graphView(workspacePath: string, opts: { limit?: number } = {}):
       sourceFile: str(n.source_file) || undefined,
       sourceLocation: str(n.source_location) || undefined,
       degree: degree.get(id) ?? 0,
-    } satisfies GraphViewNode;
+    };
   });
 
   const limit = Math.min(Math.max(1, Math.round(opts.limit ?? GRAPH_VIEW_DEFAULT_LIMIT)), GRAPH_VIEW_MAX_LIMIT);
   const ranked = [...allNodes].sort((a, b) => b.degree - a.degree || a.label.localeCompare(b.label));
-  const nodes = ranked.slice(0, limit);
-  const kept = new Set(nodes.map((n) => n.id));
-  const shownLinks = links.filter((l) => kept.has(l.source) && kept.has(l.target));
+  const nodes: GraphViewNode[] = ranked.slice(0, limit).map((n) => ({
+    id: n.id, label: n.label, community: n.community,
+    fileType: n.fileType, sourceFile: n.sourceFile, sourceLocation: n.sourceLocation, degree: n.degree,
+  }));
+  const keptIndex = new Map<string, number>();
+  nodes.forEach((n, i) => keptIndex.set(n.id, i));
+  const shownLinks: GraphViewLink[] = [];
+  for (const e of edges) {
+    const from = keptIndex.get(e.from), to = keptIndex.get(e.to);
+    if (from == null || to == null) continue;
+    shownLinks.push([from, to, e.relation]);
+  }
 
   const cohesion = analysis.cohesion ?? {};
   const communities: GraphViewCommunity[] = [...communityCount.entries()]
     .map(([id, count]) => {
       const name = str(labels[String(id)]) || allNodes.find((n) => n.community === id)?.communityName || (id >= 0 ? `community ${id}` : "unassigned");
+
       const c = cohesion[String(id)];
       return { id, name, count, cohesion: typeof c === "number" && Number.isFinite(c) ? Number(c.toFixed(4)) : undefined };
     })
@@ -179,7 +256,7 @@ export function graphView(workspacePath: string, opts: { limit?: number } = {}):
   return {
     workspace: path.basename(workspacePath),
     builtAtCommit: str(raw.built_at_commit).slice(0, 12) || undefined,
-    totals: { nodes: allNodes.length, links: links.length, communities: communityCount.size },
+    totals: { nodes: allNodes.length, links: edges.length, communities: communityCount.size },
     shown: { nodes: nodes.length, links: shownLinks.length },
     limit,
     truncated: nodes.length < allNodes.length,
@@ -253,11 +330,16 @@ export async function graphStatus(workspacePath: string): Promise<GraphStatus> {
 }
 
 async function runGraphify(args: string[], cwd: string, timeoutMs: number): Promise<ToolResult> {
-  const avail = await graphifyAvailable();
-  if (!avail.ok) return { success: false, error: installHint() };
+  const ensured = await ensureGraphify();
+  if (!ensured.ok) {
+    const msg = ensured.skipped === "termux"
+      ? "graphify dilewati di Termux/Android (tidak didukung) — semua fungsi lain tetap jalan normal"
+      : ensured.detail || installHint();
+    return { success: false, error: msg };
+  }
   const started = Date.now();
   try {
-    const { stdout, stderr } = await execFileAsync(GRAPHIFY_BIN, args, { cwd, timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileAsync(bin(), args, { cwd, timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 });
     const out = (String(stdout) + (stderr ? `\n[stderr]\n${stderr}` : "")).slice(-20_000);
     return { success: true, output: out, metadata: { duration: Date.now() - started, exitCode: 0 } };
   } catch (e: unknown) {
