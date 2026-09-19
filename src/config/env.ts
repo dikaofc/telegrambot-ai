@@ -22,6 +22,12 @@ const EnvSchema = z.object({
   PROVIDER_MODEL_FALLBACK: z.string().default("cph/cehpoint-ai"),
   AGENT_MAX_RETRIES: z.coerce.number().default(5),
   AGENT_TIMEOUT_MS: z.coerce.number().default(1_800_000),
+  // Hard wall-clock + step budget so one runaway run can never eat the machine.
+  AGENT_MAX_STEPS: z.coerce.number().default(25),
+  // Character budget for the conversation sent to the model (context window).
+  AGENT_MAX_CONTEXT_CHARS: z.coerce.number().default(60_000),
+  // Known-failure memory: how many consecutive failures trigger a replan.
+  AGENT_REPLAN_AFTER: z.coerce.number().default(3),
   WORKSPACE_ROOT: z.string().default("./workspaces"),
   DATABASE_URL: z.string().default("./data/teleagent.db"),
   REDIS_URL: z.string().default(""),

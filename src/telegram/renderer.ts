@@ -13,6 +13,10 @@ export function renderEventLine(ev: AgentEvent): string | null {
   switch (ev.type) {
     case "thinking": return "✨ Lagi ngulik permintaanmu...";
     case "planning": return `🧠 ${ev.message}`;
+    case "plan": return `🗺️ plan r${ev.revision}: ${ev.label}`;
+    case "replan": return `🔁 replan r${ev.revision} — ${ev.reason.slice(0, 200)}`;
+    case "progress": return null;
+    case "step_done": return `✓ ${ev.title}`;
     case "tool_start":
       if (ev.tool === "read_file" || ev.tool === "glob" || ev.tool === "grep" || ev.tool === "search_code")
         return `📖 baca ${String((ev.args.target ?? ev.args.pattern ?? ev.args.query ?? "") as string)}`;
@@ -41,11 +45,16 @@ export interface StatusSnapshot {
   testsPassed: number;
   errors: number;
   detail: string[];
+  /** Live plan progress ("step 2/4 · implement: …") from a real plan. */
+  plan?: string;
+  planSteps?: Array<{ title: string; status: string }>;
 }
 
 export function emptySnapshot(): StatusSnapshot {
   return { phase: "starting", progress: 2, filesChanged: 0, testsPassed: 0, errors: 0, detail: [] };
 }
+
+const STEP_ICON: Record<string, string> = { completed: "✓", in_progress: "→", failed: "✗", skipped: "-", pending: "•" };
 
 export function applyEvent(snap: StatusSnapshot, ev: AgentEvent): StatusSnapshot {
   const next = { ...snap, detail: [...snap.detail].slice(-8) };
@@ -53,6 +62,12 @@ export function applyEvent(snap: StatusSnapshot, ev: AgentEvent): StatusSnapshot
   if (line) next.detail.push(line);
   switch (ev.type) {
     case "state": next.phase = ev.state; next.progress = Math.min(95, next.progress + 4); break;
+    case "plan": next.plan = ev.label; next.planSteps = ev.steps.map((s) => ({ title: s.title, status: s.status })); break;
+    case "replan": next.plan = `revision ${ev.revision}`; break;
+    case "progress": next.plan = ev.label; if (ev.percent > next.progress) next.progress = Math.min(95, ev.percent); break;
+    case "step_done":
+      if (next.planSteps) next.planSteps = next.planSteps.map((s) => (s.title === ev.title ? { ...s, status: "completed" } : s));
+      break;
     case "tool_start": next.tool = ev.tool; if (ev.tool === "shell") next.command = String(ev.args.command ?? "").slice(0, 120); next.progress = Math.min(95, next.progress + 3); break;
     case "file_change": next.filesChanged += ev.files.length; break;
     case "test": next.testsPassed += ev.passed; next.errors += ev.failed; break;
@@ -67,6 +82,8 @@ export function renderStatusMessage(snap: StatusSnapshot): string {
     "✨ Lagi dikerjain...",
     "",
     `status: ${snap.phase}`,
+    snap.plan ? `plan: ${snap.plan}` : undefined,
+    ...(snap.planSteps ?? []).slice(0, 5).map((s) => `  ${STEP_ICON[s.status] ?? "•"} ${s.title.slice(0, 70)}`),
     snap.tool ? `tool: ${snap.tool}` : undefined,
     snap.command ? `cmd: ${snap.command}` : undefined,
     "",

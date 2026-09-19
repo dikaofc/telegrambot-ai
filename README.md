@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://github.com/Graphify-Labs/graphify"><img src="https://img.shields.io/badge/harness-super--power-8a5cf6?style=for-the-badge" alt="harness"/></a>
   <a href="#"><img src="https://img.shields.io/badge/Node-%3E%3D22-3fb950?style=for-the-badge&logo=node.js" alt="node"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-126%20passing-2f81f7?style=for-the-badge" alt="tests"/></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-127%20passing-2f81f7?style=for-the-badge" alt="tests"/></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-8b949e?style=for-the-badge" alt="license"/></a>
 </p>
 
@@ -125,7 +125,7 @@ Ketik `/` di Telegram → muncul autocomplete. Semua command juga ada tombol inl
 | `/approve <id>` | setujui (cukup digit awal) | `/approve a8f31d` |
 | `/reject <id>` | tolak; agent cari jalan lain | `/reject a8f31d` |
 | `/usage` | token hari ini/kuota + lifetime runs/cost | `/usage` |
-| `/doctor` | cek telegram/db/provider/sandbox/pty | `/doctor` |
+| `/doctor` | diagnosa 12 subsistem (token/db/workspace/disk/RAM/provider/circuit/graphify/sandbox/pty/node) PASS-WARN-FAIL + hint aksi | `/doctor` |
 | `/graph <q>` | tanya knowledge graph | `/graph what connects auth to db?` |
 
 > Kata biasa juga bisa: ketik `stop`, `pause`, `resume` tanpa `/` → sama aja.
@@ -180,7 +180,8 @@ PROVIDER_MODEL=auto
 | `custom` | `PROVIDER_BASE_URL=https://...` + key + `PROVIDER_MODEL` | endpoint kamu |
 
 Mau override endpoint bawaan? Isi aja `PROVIDER_BASE_URL` — cuma ngaruh ke `PROVIDER` yang lagi dipilih, gak bocor ke lain.  
-`PROVIDER_MODEL=auto` = router pilih model per task + fallback chain.
+`PROVIDER_MODEL=auto` = router pilih model per task + fallback chain.  
+`PROVIDER_MODEL_FALLBACK=cph/cehpoint-ai` (boleh koma: `model-a,model-b`) = model cadangan **dengan key yang sama** — dicoba otomatis kalau model utama 429/500/down. Provider yang gagal 3x beruntun masuk circuit-breaker cooldown 60 detik (kelihatan di `/doctor` → `circuit` dan `GET /api/circuit`).
 
 Full `.env` lihat `cp .env.example .env` — ada komentar cara pakai tiap provider + TELEGRAM, workspace, sandbox, rate limit, dsb.
 
@@ -331,7 +332,7 @@ npm run dev
 npm run typecheck   # tsc --noEmit
 npm run lint        # cek secret hardcode + style
 npm run build       # tsc -> dist/
-npm test            # vitest run  (126 passing)
+npm test            # vitest run  (127 passing)
 npm run dev         # watch bot
 npm run tui         # terminal UI
 ```
@@ -348,7 +349,7 @@ TeleAgent dibikin biar **vibe coder, gen Z, solo dev, sampai tim** bisa ngoding 
 - 🍴 **Fork** + bikin fitur kamu sendiri (plugin `AgentPlugin` gampang banget)
 - 💬 **Share** ke temen yang ngoding dari HP / Termux
 
-Punya ide tool baru? Bikin `src/tools/*.ts` + daftarin di `src/tools/registry.ts` + tulis test di `tests/*.test.ts` — PR auto di-test 126 suite. No gatekeeping, no drama.
+Punya ide tool baru? Bikin `src/tools/*.ts` + daftarin di `src/tools/registry.ts` + tulis test di `tests/*.test.ts` — PR auto di-test 127 suite. No gatekeeping, no drama.
 
 > Built with 💜 for builders yang pengen **ngoding sambil rebahan, tapi harness-nya super power.**
 

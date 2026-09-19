@@ -1,7 +1,6 @@
 import { Bot, InputFile, type Context } from "grammy";
 import { getEnv, KNOWN_PROVIDERS } from "../config/env.js";
 import { getLogger } from "../observability/logger.js";
-import { checkHealth } from "../observability/health.js";
 import { store } from "../database/store.js";
 import { isAuthorized } from "../security/access.js";
 import { resolveWorkspacePath } from "../workspace/manager.js";
@@ -274,9 +273,9 @@ Ketik aja mau ngapain — langsung jalan`,
   bot.command("doctor", async (ctx) => {
     if (!authed(ctx)) return;
     try {
-      const h = await checkHealth();
-      const rows = Object.entries(h.detail ?? {}).map(([k, v]) => `${k}: ${v}`);
-      await ctx.reply(`🩺 doctor — ${h.status}\n\ntelegram: ${h.telegram}\ndatabase: ${h.database}\nsandbox: ${h.sandbox}\nprovider: ${h.provider}\nworkspace: ${h.workspace}\npty: ${h.pty}\n\n${rows.join("\n")}`.slice(0, 3500));
+      await ctx.reply("🩺 Diagnosa semua subsistem — bentar ya...");
+      const { runDoctor, renderDoctorText } = await import("../observability/doctor.js");
+      await ctx.reply(renderDoctorText(await runDoctor()));
     } catch (e) { await ctx.reply(`Doctor gagal — ${String(e).slice(0, 500)}`); }
   });
 

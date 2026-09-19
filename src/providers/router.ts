@@ -1,5 +1,6 @@
 import { createProvider } from "./factory.js";
 import { getEnv } from "../config/env.js";
+import { isAvailable, recordSuccess, recordFailure, leastTripped } from "./circuit.js";
 import type { ChatRequest, LLMEvent } from "./types.js";
 import { getLogger } from "../observability/logger.js";
 
@@ -23,7 +24,17 @@ export function classifyTask(input: string): "coding" | "reasoning" | "chat" {
 
 export async function* chatWithFallback(request: ChatRequest, routing: RoutingConfig): AsyncIterable<LLMEvent> {
   const log = getLogger();
-  const order = [routing.primary, ...(routing.allowFallback ? routing.fallback : [])];
+  const fullOrder = [routing.primary, ...(routing.allowFallback ? routing.fallback : [])];
+  // Skip providers in circuit-breaker cooldown; if ALL are tripped, fail-open
+  // on the least-recently-tripped one instead of refusing outright.
+  let order = fullOrder.filter((n) => isAvailable(n));
+  if (order.length === 0) {
+    const again = leastTripped(fullOrder);
+    log.warn({ event: "provider.circuit.all-tripped", order: fullOrder }, "all providers in cooldown — fail-open retry");
+    order = again ? [again] : fullOrder;
+  } else if (order.length < fullOrder.length) {
+    log.warn({ event: "provider.circuit.skip", skipped: fullOrder.filter((n) => !isAvailable(n)) }, "skipping tripped providers");
+  }
   let lastError: unknown = null;
   for (const providerName of order) {
     const provider = createProvider(providerName);
@@ -33,11 +44,14 @@ export async function* chatWithFallback(request: ChatRequest, routing: RoutingCo
       ? [request.model, ...(routing.modelFallback ?? [])].filter((m, i, a) => m && a.indexOf(m) === i)
       : [request.model];
     for (const m of models) {
+      const t0 = Date.now();
       try {
         yield* provider.chat({ ...request, model: m });
+        recordSuccess(providerName, Date.now() - t0);
         return;
       } catch (e) {
         lastError = e;
+        recordFailure(providerName, e);
         log.warn({ event: "provider.failed", provider: providerName, model: m, err: String(e) }, "provider failed, trying fallback");
       }
     }

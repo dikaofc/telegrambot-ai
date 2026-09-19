@@ -9,6 +9,8 @@ export const metrics = {
   agentRunsTotal: makeCounter(),
   agentRunsSuccess: makeCounter(),
   agentRunsFailed: makeCounter(),
+  /** Run finished but the objective was not attempted (provider/upstream blocker). */
+  agentRunsDegraded: makeCounter(),
   toolCallsTotal: makeCounter(),
   toolFailures: makeCounter(),
   providerRequests: makeCounter(),
@@ -35,6 +37,7 @@ export function renderPrometheus(): string {
     `agent_runs_total ${metrics.agentRunsTotal.get()}`,
     `agent_runs_success ${metrics.agentRunsSuccess.get()}`,
     `agent_runs_failed ${metrics.agentRunsFailed.get()}`,
+    `agent_runs_degraded ${metrics.agentRunsDegraded.get()}`,
     `agent_run_duration_avg_ms ${avgRunDuration()}`,
     `tool_calls_total ${metrics.toolCallsTotal.get()}`,
     `tool_failures ${metrics.toolFailures.get()}`,

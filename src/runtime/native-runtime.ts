@@ -1,15 +1,24 @@
 import { getEnv } from "../config/env.js";
-import { buildRegistry, toolSchemasForLLM } from "../tools/registry.js";
+import { buildRegistry } from "../tools/registry.js";
+import { selectToolSchemas } from "../tools/capabilities.js";
 import { chatWithFallback, defaultRouting, classifyTask, estimateCostUsd } from "../providers/router.js";
 import { toolRisk, policyForRisk, RiskLevel } from "../security/risk.js";
 import { classifyCommand } from "../security/command-parser.js";
 import { hashArgs, auditTool } from "../security/audit.js";
 import { store } from "../database/store.js";
 import { metrics, recordRunDuration } from "../observability/metrics.js";
-import { loadSkillPrompt } from "../agent/skills.js";
+import { getLogger } from "../observability/logger.js";
+import { pickSkill } from "../agent/skills.js";
 import { buildSystemPrompt } from "../agent/prompts.js";
 import { runVerification } from "../agent/verification.js";
 import { createCheckpoint } from "../agent/checkpoint.js";
+import { composeRunMessages, enforceContextBudget } from "../agent/context-window.js";
+import {
+  buildPlan, markStep, replan, renderPlanProgress, persistPlan,
+  type Plan, type PlanPhase, type PlanStepStatus,
+} from "../agent/planner.js";
+import { rememberFailure, markFailureResolved, failureHints, fingerprintError } from "../agent/failure-memory.js";
+import { detectProjectProfile } from "../workspace/manager.js";
 import { gitTools } from "../tools/git.js";
 import type { AgentContext, AgentEvent, AgentRuntime } from "./types.js";
 import type { ChatMessage } from "../providers/types.js";
@@ -27,11 +36,19 @@ function isWriteCall(name: string, args: Record<string, unknown>): boolean {
   return true;
 }
 
+const READ_TOOLS = new Set([
+  "read_file", "read_many", "list_directory", "tree", "glob", "find_files", "grep",
+  "search_code", "symbol_outline", "find_definition", "find_references", "git_status",
+  "git_diff", "git_log", "graphify_query", "graphify_path", "graphify_explain", "scout",
+]);
+
 /**
  * NativeRuntime — the autonomous agent loop:
- * understand → context discovery → plan → tool selection → execute →
- * observe → verify → retry → complete. Real tool execution only; events are
- * emitted after tools actually run (never simulated).
+ * understand → plan → discover → execute → observe → replan → verify → review.
+ *
+ * Everything is real: tools execute, events are emitted only after a real
+ * operation, metrics reflect what actually happened, and a run that cannot
+ * finish says so instead of reporting success.
  */
 export class NativeRuntime implements AgentRuntime {
   private ctx!: AgentContext;
@@ -57,40 +74,71 @@ export class NativeRuntime implements AgentRuntime {
   async *run(input: string): AsyncIterable<AgentEvent> {
     const started = Date.now();
     const env = getEnv();
-    const maxRetries = env.AGENT_MAX_RETRIES;
+    const log = getLogger();
+    const maxIterations = Math.max(1, env.AGENT_MAX_STEPS);
+    const replanAfter = Math.max(1, env.AGENT_REPLAN_AFTER);
+    const deadline = started + Math.max(60_000, env.AGENT_TIMEOUT_MS);
     metrics.agentRunsTotal.inc();
     const taskKind = classifyTask(input);
 
     yield { type: "state", state: "thinking" };
     yield { type: "thinking", message: "analyzing request" };
 
-    // conversation history (short-term context)
+    // ---- context discovery (bounded, secret-redacted history) ----
     const history = store.messages(this.ctx.sessionId, 40);
     const chatHistory: ChatMessage[] = history.map((m) => ({
       role: m.role === "assistant" ? "assistant" as const : m.role === "system" ? "system" as const : "user" as const,
       content: String(m.content).slice(0, 4000),
     }));
+    const summary = store.getMemory("session", this.ctx.sessionId).summary ?? null;
 
-    const skillPrompt = loadSkillPrompt(input);
-    const systemPrompt = buildSystemPrompt({ workspacePath: this.ctx.workspacePath, taskKind, skillPrompt });
-
+    // ---- plan (deterministic; no provider needed) ----
+    const skill = pickSkill(input);
+    const profile = (() => { try { return detectProjectProfile(this.ctx.workspacePath); } catch { return undefined; } })();
+    const failureHint = failureHints(this.ctx.workspacePath);
+    let plan: Plan = buildPlan({ input, taskKind, workspacePath: this.ctx.workspacePath, profile, skill: skill?.name ?? null });
+    persistPlan(this.ctx.runId, plan);
     yield { type: "state", state: "planning" };
-    yield { type: "planning", message: `planning ${taskKind} task` };
+    yield { type: "planning", message: renderPlanProgress(plan) };
+    yield { type: "plan", revision: plan.revision, label: renderPlanProgress(plan), steps: plan.steps.map((s) => ({ id: s.id, title: s.title, phase: s.phase, status: s.status })) };
+    yield { type: "progress", percent: 0, label: renderPlanProgress(plan) };
 
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      ...chatHistory.slice(-12),
-      { role: "user", content: input },
-    ];
-    // oc/muse-spark-*-free via 9router blocks tools (FreeTierError) — for pure chat don't send tools at all
-    const fullToolSchemas = toolSchemasForLLM(this.registry);
-    const toolSchemas = taskKind === "chat" ? [] : fullToolSchemas;
+    const skillPrompt = skill ? `\nActive skill [${skill.name}]: ${skill.description}\n${skill.instructions}\n` : "";
+    const systemPrompt = buildSystemPrompt({
+      workspacePath: this.ctx.workspacePath,
+      taskKind,
+      skillPrompt: skillPrompt + failureHint,
+    });
+
+    const composed = composeRunMessages({
+      systemPrompt, history: chatHistory, summary, input,
+      maxChars: env.AGENT_MAX_CONTEXT_CHARS,
+    });
+    let messages: ChatMessage[] = composed.messages;
+    let compactedTotal = composed.compacted;
+
     const filesChanged: string[] = [];
     let tokensIn = 0; let tokensOut = 0;
     let done = false;
     let iterations = 0;
-    const maxIterations = 25;
     let checkpointId: string | null = null;
+    let readSuccesses = 0;
+    let writeSuccesses = 0;
+    let consecutiveFailures = 0;
+    let lastFailedTool = "";
+    let lastErrorText = "";
+    const attempted: string[] = [];
+    let replans = 0;
+    let forcedImplement = false;
+    let nudged = false;
+    let verificationPassed: number | null = null;
+    let verificationFailed = 0;
+
+    const updatePlan = (next: Plan, stepId?: string, status?: PlanStepStatus, note?: string): Plan => {
+      plan = stepId && status ? markStep(next, stepId, status, note) : next;
+      persistPlan(this.ctx.runId, plan);
+      return plan;
+    };
 
     const recordUsage = (status: string): void => {
       try {
@@ -114,11 +162,32 @@ export class NativeRuntime implements AgentRuntime {
         checkpointId = await createCheckpoint(this.ctx.runId, wsId, this.ctx.workspacePath);
       } catch { /* best-effort safety net */ }
     };
+    /** Which tool set the model may see right now — no writes before discovery. */
+    const phaseFor = (): PlanPhase => {
+      if (taskKind === "chat") return "none";
+      if (taskKind === "reasoning") return readSuccesses === 0 && iterations <= 3 ? "discover" : "none";
+      return forcedImplement || readSuccesses > 0 ? "implement" : "discover";
+    };
 
     while (!done && iterations < maxIterations && !this.aborted) {
       iterations += 1;
       await this.waitIfPaused();
       if (this.aborted) break;
+      if (Date.now() > deadline) {
+        yield { type: "error", error: `time budget exceeded (${Math.round(env.AGENT_TIMEOUT_MS / 1000)}s)` };
+        break;
+      }
+
+      // Context engineering: trim oversized tool results and keep the window bounded.
+      const windowed = enforceContextBudget(messages, env.AGENT_MAX_CONTEXT_CHARS);
+      if (windowed.compacted > 0) {
+        compactedTotal += windowed.compacted;
+        yield { type: "thinking", message: `context compacted (${windowed.compacted} earlier messages folded)` };
+      }
+      messages = windowed.messages;
+
+      const phase = phaseFor();
+      const toolSchemas = selectToolSchemas(this.registry, taskKind, phase);
 
       let pendingTool: { id: string; name: string; args: Record<string, unknown> } | null = null;
       let textBuf = "";
@@ -158,8 +227,9 @@ export class NativeRuntime implements AgentRuntime {
               `Coba /doctor buat cek status, atau /model auto. Sementara: **TeleAgent AI** ✨`;
           }
           recordUsage("completed");
-          metrics.agentRunsSuccess.inc();
+          metrics.agentRunsDegraded.inc();
           recordRunDuration(Date.now() - started);
+          updatePlan(plan, plan.steps[0]?.id, "completed", "answered without the model (provider unreachable)");
           yield { type: "state", state: "completed" };
           yield { type: "completed", summary: helpSummary, filesChanged: [] };
           done = true;
@@ -168,7 +238,7 @@ export class NativeRuntime implements AgentRuntime {
         // For coding tasks, do triage then explain
         yield* this.deterministicProbe(input, filesChanged);
         recordUsage("completed");
-        metrics.agentRunsSuccess.inc();
+        metrics.agentRunsDegraded.inc();
         recordRunDuration(Date.now() - started);
         yield { type: "state", state: "completed" };
         const triageNote = isFreeTier
@@ -197,6 +267,22 @@ export class NativeRuntime implements AgentRuntime {
             if (retryText.trim()) textBuf = retryText;
           } catch { /* keep empty → fallback below */ }
         }
+
+        // A coding request must not "answer" before it has inspected anything:
+        // escalate to the implement phase and make one explicit nudge.
+        const noEvidenceYet = taskKind === "coding" && readSuccesses === 0 && writeSuccesses === 0;
+        if (noEvidenceYet && !nudged) {
+          nudged = true;
+          forcedImplement = true;
+          messages.push({ role: "assistant", content: textBuf.trim() || "(no tool call yet)" });
+          messages.push({
+            role: "user",
+            content: "You have not inspected the workspace yet. Use the available tools to discover the relevant files, then implement the change. Do not answer from memory.",
+          });
+          yield { type: "thinking", message: "no evidence yet — escalating to implementation step" };
+          continue;
+        }
+
         const finalText = textBuf.trim();
         // Last resort: if still empty, give a deterministic chat answer so user never sees blank "task completed"
         let fallback = taskKind === "chat"
@@ -204,15 +290,53 @@ export class NativeRuntime implements AgentRuntime {
           : "Task analyzed. No tool actions were required.";
         // Honor explicit "3 kata" / "3 words" constraint when we have to synthesize
         if (!finalText && /3\s*kata|3\s*words|tiga\s*kata/i.test(input)) fallback = "Aku TeleAgent pintar";
-        const summary = finalText || fallback;
-        messages.push({ role: "assistant", content: summary });
-        yield { type: "state", state: "completed" };
-        metrics.agentRunsSuccess.inc();
+        const summaryText = finalText || fallback;
+        messages.push({ role: "assistant", content: summaryText });
+
+        // Verify before declaring success when we actually changed something.
+        const verifyStep = plan.steps.find((s) => s.phase === "verify");
+        if (taskKind === "coding" && filesChanged.length > 0) {
+          const report = await runVerification(this.ctx.workspacePath, true);
+          verificationPassed = report.passed;
+          verificationFailed = report.failed;
+          if (verifyStep) updatePlan(plan, verifyStep.id, report.failed === 0 ? "completed" : "failed",
+            `verified: ${report.passed} passed, ${report.failed} failed`);
+          yield { type: "test", passed: report.passed, failed: report.failed, output: report.output.slice(0, 2000) };
+        }
+
+        // Close out remaining steps, but never fake a verification that did not run.
+        for (const s of plan.steps) {
+          if (s.phase === "verify") continue;
+          if (s.status === "pending" || s.status === "in_progress") updatePlan(plan, s.id, "completed");
+        }
+        if (verifyStep && verifyStep.status === "pending") {
+          updatePlan(plan, verifyStep.id, "skipped", "no changes to verify");
+        }
+        yield { type: "progress", percent: 100, label: renderPlanProgress(plan) };
+
+        if (verificationFailed > 0) {
+          metrics.agentRunsFailed.inc();
+          recordUsage("failed");
+          yield { type: "state", state: "failed" };
+          yield {
+            type: "completed",
+            summary: `${summaryText}\n\n⚠️ verification FAILED: ${verificationFailed} check(s) did not pass (${verificationPassed ?? 0} passed). The change is on disk but must be treated as unverified.`,
+            filesChanged, testsPassed: verificationPassed ?? undefined,
+          };
+        } else {
+          metrics.agentRunsSuccess.inc();
+          recordUsage("completed");
+          yield { type: "state", state: "completed" };
+          const verifyNote = verificationPassed !== null ? `\n\nverification: ${verificationPassed} check(s) passed` : "";
+          const maybeGit = taskKind === "chat" && filesChanged.length === 0 ? "" : await gitStat();
+          yield {
+            type: "completed",
+            summary: summaryText + verifyNote + maybeGit,
+            filesChanged, testsPassed: verificationPassed ?? undefined,
+          };
+        }
         recordRunDuration(Date.now() - started);
-        recordUsage("completed");
-        // Don't append git noise to pure chat
-        const maybeGit = taskKind === "chat" && filesChanged.length === 0 ? "" : await gitStat();
-        yield { type: "completed", summary: summary + maybeGit, filesChanged };
+        yield { type: "progress", percent: 100, label: "completed" };
         done = true;
         break;
       }
@@ -269,9 +393,10 @@ export class NativeRuntime implements AgentRuntime {
         }
       }
 
-      const stateForTool = pendingTool.name.includes("test") ? "testing" : pendingTool.name === "read_file" || pendingTool.name === "glob" || pendingTool.name === "grep" || pendingTool.name === "search_code" ? "reading" : pendingTool.name.includes("write") || pendingTool.name.includes("edit") ? "editing" : "executing";
+      const stateForTool = pendingTool.name.includes("test") ? "testing" : READ_TOOLS.has(pendingTool.name) ? "reading" : pendingTool.name.includes("write") || pendingTool.name.includes("edit") ? "editing" : "executing";
       yield { type: "state", state: stateForTool };
       yield { type: "tool_start", tool: pendingTool.name, args: pendingTool.args };
+      attempted.push(`${pendingTool.name} ${JSON.stringify(pendingTool.args).slice(0, 120)}`);
 
       // REAL execution happens here (auto-checkpoint before first write)
       if (isWriteCall(pendingTool.name, pendingTool.args)) await ensureCheckpoint();
@@ -300,10 +425,69 @@ export class NativeRuntime implements AgentRuntime {
       if (pendingTool.name === "shell") yield { type: "command", command: String(pendingTool.args.command ?? ""), exitCode: result.metadata?.exitCode };
       messages.push({ role: "tool", content: outText || "(empty tool result)", toolName: pendingTool.name });
 
-      // error recovery with retries
-      if (!result.success && maxRetries > 0) {
-        yield { type: "state", state: "retrying" };
-        messages.push({ role: "user", content: `The last tool call failed. Diagnose the error, inspect relevant files if needed, then try a fix. Remaining budget: ${maxIterations - iterations} steps.` });
+      // ---- observe: update plan progress from real evidence ----
+      if (result.success) {
+        markFailureResolved(this.ctx.workspacePath, pendingTool.name);
+        consecutiveFailures = 0;
+        if (READ_TOOLS.has(pendingTool.name)) readSuccesses += 1;
+        if (isWriteCall(pendingTool.name, pendingTool.args)) writeSuccesses += 1;
+      } else {
+        consecutiveFailures += 1;
+        lastFailedTool = pendingTool.name;
+        lastErrorText = String(result.error ?? "unknown error").slice(0, 400);
+      }
+
+      // Keep the step status in sync with evidence so the plan reflects reality.
+      const discoverStep = plan.steps.find((s) => s.id === "s1");
+      if (discoverStep && discoverStep.status !== "completed" && readSuccesses > 0) {
+        updatePlan(plan, "s1", "completed", "context discovered");
+        yield { type: "step_done", stepId: "s1", title: discoverStep.title };
+      }
+      const implementStep = plan.steps.find((s) => s.id === "s2");
+      if (implementStep && implementStep.status !== "completed" && writeSuccesses > 0 && taskKind === "coding") {
+        updatePlan(plan, "s2", "completed", "change applied");
+        yield { type: "step_done", stepId: "s2", title: implementStep.title };
+      }
+      yield { type: "progress", percent: Math.min(90, Math.round((iterations / maxIterations) * 100)), label: renderPlanProgress(plan) };
+
+      // ---- adaptive recovery: diagnose instead of hammering the same failure ----
+      if (!result.success) {
+        rememberFailure(this.ctx.workspacePath, pendingTool.name, lastErrorText);
+        const sameTool = lastFailedTool === pendingTool.name;
+        if (sameTool && consecutiveFailures >= replanAfter) {
+          if (replans >= 2) {
+            // Genuine blocker: stop and explain exactly what was attempted.
+            const blocked = `blocked: ${pendingTool.name} failed ${consecutiveFailures}× in a row (${fingerprintError(lastErrorText)}). ` +
+              `Replanned ${replans}× without progress, so I stopped instead of looping.`;
+            yield { type: "error", error: blocked };
+            yield { type: "state", state: "failed" };
+            recordUsage("failed");
+            metrics.agentRunsFailed.inc();
+            recordRunDuration(Date.now() - started);
+            yield {
+              type: "completed",
+              summary: `${blocked}\n\nwhat was attempted:\n${attempted.slice(-8).map((a) => `- ${a}`).join("\n")}\n\nlast error:\n${lastErrorText.slice(0, 600)}`,
+              filesChanged,
+            };
+            done = true;
+            break;
+          }
+          replans += 1;
+          const failedStepId = implementStep && implementStep.status !== "completed" ? "s2" : undefined;
+          plan = replan(plan, { reason: `${pendingTool.name} failed repeatedly: ${lastErrorText.slice(0, 200)}`, failedStepId, tool: pendingTool.name });
+          persistPlan(this.ctx.runId, plan);
+          consecutiveFailures = 0;
+          yield { type: "replan", revision: plan.revision, reason: `${pendingTool.name} failed repeatedly: ${lastErrorText.slice(0, 200)}` };
+          yield { type: "state", state: "retrying" };
+          messages.push({
+            role: "user",
+            content: `The last tool call failed and retrying it as-is is not working. Diagnose the cause (inspect the file/command involved), then change approach. Remaining step budget: ${maxIterations - iterations}.`,
+          });
+        } else if (maxIterations - iterations > 0) {
+          yield { type: "state", state: "retrying" };
+          messages.push({ role: "user", content: `The last tool call failed. Diagnose the error, inspect relevant files if needed, then try a fix. Remaining budget: ${maxIterations - iterations} steps.` });
+        }
+        log.warn({ event: "tool.failed", tool: pendingTool.name, runId: this.ctx.runId }, "tool call failed");
       }
       if (result.success && (pendingTool.name === "npm_test" || pendingTool.name === "npm_build")) {
         const m = /(\d+)\s+passed/i.exec(outText);
@@ -319,13 +503,20 @@ export class NativeRuntime implements AgentRuntime {
     }
 
     if (!done) {
-      // iteration budget exhausted → automatic verification pass then close
+      // Step/time budget exhausted → automatic verification pass, then report honestly.
       yield* this.finalVerification(filesChanged);
-      recordUsage("completed");
-      metrics.agentRunsSuccess.inc();
+      const report = await runVerification(this.ctx.workspacePath, filesChanged.length > 0);
+      verificationPassed = report.passed;
+      verificationFailed = report.failed;
+      const status = report.failed > 0 ? "failed" : "completed";
+      recordUsage(status);
+      if (report.failed > 0) metrics.agentRunsFailed.inc(); else metrics.agentRunsSuccess.inc();
       recordRunDuration(Date.now() - started);
-      yield { type: "state", state: "completed" };
-      yield { type: "completed", summary: `Finished after ${iterations} tool steps. Files changed: ${filesChanged.length}.${checkpointId ? ` Checkpoint: ${checkpointId.slice(0, 8)}.` : ""}` + (await gitStat()), filesChanged };
+      yield { type: "state", state: report.failed > 0 ? "failed" : "completed" };
+      const budgetNote = `Finished after ${iterations} tool steps (budget: ${maxIterations}). Files changed: ${filesChanged.length}.` +
+        (checkpointId ? ` Checkpoint: ${checkpointId.slice(0, 8)}.` : "") +
+        (report.failed > 0 ? ` ⚠️ verification: ${report.failed} check(s) still failing — task is NOT verified.` : "");
+      yield { type: "completed", summary: budgetNote + (await gitStat()), filesChanged, testsPassed: report.passed };
     }
   }
 

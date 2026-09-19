@@ -69,8 +69,8 @@ async function handle(line: string, out: (s: string) => void): Promise<boolean> 
     }
     case "metrics": out(metricsText()); break;
     case "doctor": {
-      const { checkHealth } = await import("../../../src/observability/health.js");
-      out(JSON.stringify(await checkHealth(), null, 2));
+      const { runDoctor } = await import("../../../src/observability/doctor.js");
+      out(JSON.stringify(await runDoctor(), null, 2));
       break;
     }
     case "help": case "?": out(HELP); break;

@@ -5,7 +5,7 @@ import { getLogger } from "../observability/logger.js";
 import { renderPrometheus, metrics } from "../observability/metrics.js";
 import { checkHealth } from "../observability/health.js";
 import { store } from "../database/store.js";
-import { listWorkspaces, resolveWorkspacePath, detectProjectProfile } from "../workspace/manager.js";
+import { listWorkspaces, resolveWorkspacePath, detectProjectProfile, type ProjectProfile } from "../workspace/manager.js";
 import { availableProviders, createProvider } from "../providers/factory.js";
 import { startRun, stopRun, pauseRun, resumeRun, ensureSession, activeRunCount, sessionRunId, runIdForLookup } from "../agent/orchestrator.js";
 import { dispatchWebhookUpdate, webhookHandlerReady } from "../telegram/webhook-bus.js";
@@ -216,7 +216,7 @@ export async function buildApiServer() {
     return {
       workspaces: names.map((n) => {
         let p = n;
-        let profile: Record<string, unknown> = {};
+        let profile: ProjectProfile = {};
         try { p = resolveWorkspacePath(n); profile = detectProjectProfile(p); } catch { /* unreadable workspace */ }
         return { name: n, path: p, profile };
       }),
@@ -235,6 +235,11 @@ export async function buildApiServer() {
       } catch { return { name: n, selected: true, healthy: false, models: [] as string[] }; }
     }));
     return { providers, selected };
+  });
+  app.get("/api/circuit", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const { circuitSnapshot } = await import("../providers/circuit.js");
+    return { circuit: circuitSnapshot() };
   });
   app.get("/api/usage", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;

@@ -158,9 +158,22 @@ export function createBot(): Bot {
         if (last) await runAgentForMessage(ctx as unknown as Context, last);
       } else if (data.startsWith("appr:ok:") || data.startsWith("appr:no:")) {
         const approvalId = data.split(":")[2] as string;
-        store.resolveApproval(approvalId, data.startsWith("appr:ok:") ? "approved" : "rejected");
-        await answer({ text: data.startsWith("appr:ok:") ? "approved" : "rejected" });
-        await ctx.editMessageText(data.startsWith("appr:ok:") ? "✅ approved — resuming…" : "❌ rejected — agent will work around it.");
+        const approved = data.startsWith("appr:ok:");
+        const ap = store.getApproval(approvalId) as { run_id: string; status: string } | undefined;
+        const { runIdForLookup } = await import("../agent/orchestrator.js");
+        const alive = ap ? runIdForLookup(ap.run_id) : false;
+        store.resolveApproval(approvalId, approved ? "approved" : "rejected");
+        await answer({ text: approved ? "approved" : "rejected" });
+        try {
+          await ctx.editMessageText(
+            !ap ? "❓ Approval tidak dikenal (mungkin sudah dibersihkan)."
+              : ap.status !== "pending" ? `ℹ️ Approval ini sudah di-${ap.status} sebelumnya.`
+              : !alive ? (approved
+                ? "✅ noted — tapi run-nya sudah selesai, tidak ada yang dilanjutkan."
+                : "❌ noted — run-nya sudah selesai.")
+              : approved ? "✅ approved — resuming…" : "❌ rejected — agent will work around it.",
+          );
+        } catch { /* already edited */ }
       } else if (data === "set:model") {
         await answer({ text: "model" });
         await ctx.reply("🤖 <b>Ganti Model</b>\n\nKetik: <code>/model nama-model</code>\nContoh: <code>/model oc/muse-spark-1.2-contributor-free</code>\nAtau natural: <i>pakai model minimax</i>", { parse_mode: "HTML" });
@@ -353,9 +366,15 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   const dbUser = store.upsertUser(telegramId, ctx.from?.username);
   const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
 
-  // workspace resolution: explicit "project X" wins, otherwise keep the session's current workspace
+  // workspace resolution: explicit "project X" wins, otherwise keep the session's current workspace.
+  // A name that escapes WORKSPACE_ROOT is dropped (with a note) instead of
+  // throwing before the status message is sent.
   const setting = parseNaturalSettings(text);
-  const explicitWs = setting?.key === "workspace" ? setting.value : null;
+  let explicitWs: string | null = null;
+  if (setting?.key === "workspace") {
+    try { resolveWorkspacePath(setting.value); explicitWs = setting.value; }
+    catch (e) { await ctx.reply(`❌ ${String(e).slice(0, 200)}`); }
+  }
   const sessionId = ensureSession(dbUser, chatDb, explicitWs, null, null);
   const sess = store.getSession(sessionId) as { provider: string; model: string; workspace_id: string } | undefined;
   const sessWs = sess ? (store.getWorkspaceById(sess.workspace_id) as { path: string } | undefined)?.path : undefined;

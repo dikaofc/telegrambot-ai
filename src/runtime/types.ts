@@ -3,10 +3,21 @@ export type AgentState =
   | "executing" | "testing" | "waiting_approval" | "retrying"
   | "completed" | "failed" | "cancelled";
 
+export interface PlanStepEvent {
+  id: string;
+  title: string;
+  phase: string;
+  status: string;
+}
+
 export type AgentEvent =
   | { type: "thinking"; message: string }
   | { type: "planning"; message: string }
+  | { type: "plan"; revision: number; label: string; steps: PlanStepEvent[] }
+  | { type: "replan"; revision: number; reason: string }
+  | { type: "progress"; percent: number; label: string }
   | { type: "tool_start"; tool: string; args: Record<string, unknown> }
+  | { type: "step_done"; stepId: string; title: string }
   | { type: "tool_output"; tool: string; output: string; success: boolean }
   | { type: "file_change"; files: string[] }
   | { type: "command"; command: string; exitCode?: number }

@@ -110,7 +110,10 @@ export function metricsText(): string {
 }
 
 export async function graphifyText(workspace: string): Promise<string> {
-  const s = await graphStatus(resolveWorkspacePath(workspace));
+  let wsPath: string;
+  try { wsPath = resolveWorkspacePath(workspace); }
+  catch (e) { return `invalid workspace: ${String(e)}`; }
+  const s = await graphStatus(wsPath);
   return JSON.stringify(s, null, 2);
 }
 

@@ -10,6 +10,7 @@ process.env.TELEAGENT_API_KEY = "";
 
 import { resolveWorkspacePath, workspaceRoot, assertInsideWorkspace } from "../src/workspace/manager.js";
 import { setWebhookHandler, webhookHandlerReady, dispatchWebhookUpdate } from "../src/telegram/webhook-bus.js";
+import { registerWebhookBot } from "../src/telegram/gateway.js";
 import { buildApiServer } from "../src/api/server.js";
 import { store } from "../src/database/store.js";
 import { openDatabase } from "../src/database/db.js";
@@ -56,6 +57,26 @@ describe("telegram webhook wiring", () => {
     expect(webhookHandlerReady()).toBe(true);
     expect(await dispatchWebhookUpdate({ update_id: 42 } as never)).toBe(true);
     expect(seen).toEqual([42]);
+    setWebhookHandler(null);
+  });
+
+  it("registerWebhookBot inits grammy once and forwards every update", async () => {
+    let inits = 0;
+    const seen: unknown[] = [];
+    const fakeBot = {
+      init: async () => { inits++; },
+      handleUpdate: async (u: unknown) => { seen.push(u); },
+    } as unknown as Parameters<typeof registerWebhookBot>[0];
+    registerWebhookBot(fakeBot);
+    expect(webhookHandlerReady()).toBe(true);
+    // concurrent first dispatches must share one getMe() round trip
+    await Promise.all([
+      dispatchWebhookUpdate({ update_id: 1 } as never),
+      dispatchWebhookUpdate({ update_id: 2 } as never),
+    ]);
+    await dispatchWebhookUpdate({ update_id: 3 } as never);
+    expect(seen).toHaveLength(3);
+    expect(inits).toBe(1);
     setWebhookHandler(null);
   });
 
