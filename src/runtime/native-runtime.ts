@@ -132,14 +132,47 @@ export class NativeRuntime implements AgentRuntime {
           else if (ev.type === "usage" && ev.usage) { tokensIn += ev.usage.inputTokens; tokensOut += ev.usage.outputTokens; }
         }
       } catch (e) {
-        yield { type: "error", error: `provider error: ${String(e).slice(0, 1000)}` };
-        // deterministic fallback: do something useful without LLM (grep + read)
+        const errMsg = String(e).slice(0, 1500);
+        yield { type: "error", error: `provider error: ${errMsg.slice(0, 1000)}` };
+        const isFreeTier = /FreeTierError|can only be used from within OpenCode/i.test(errMsg);
+        const isChat = taskKind === "chat";
+        // For chat, never do workspace triage — give a helpful answer + guidance instead
+        if (isChat) {
+          let helpSummary: string;
+          if (isFreeTier) {
+            helpSummary = `⚠️ Model \`${this.ctx.model}\` free tier cuma bisa dipakai di dalam OpenCode, gak bisa via 9router.\n\n` +
+              `Solusi (pilih 1):\n` +
+              `• /model auto  → pakai router default 9router (paling aman)\n` +
+              `• /provider openai + isi PROVIDER_API_KEY yang valid\n` +
+              `• Ganti .env: PROVIDER_MODEL=auto lalu restart bot\n\n` +
+              `Sementara aku jawab 2 kata: **TeleAgent AI** ✨`;
+          } else if (/Incorrect API key|invalid_api_key|Bad credentials|401|403/i.test(errMsg)) {
+            helpSummary = `⚠️ Provider \`${this.ctx.provider}\` error auth: ${errMsg.slice(0, 300)}\n\n` +
+              `Cek PROVIDER_API_KEY di .env — key 9router gak bisa dipakai buat openai/xai.\n` +
+              `Coba: /model auto  atau  /provider ollama (lokal, tanpa key)\n\n` +
+              `Chat 2 kata: **TeleAgent AI** ✨`;
+          } else {
+            helpSummary = `⚠️ Provider unreachable (${this.ctx.provider}): ${errMsg.slice(0, 300)}\n\n` +
+              `Coba /doctor buat cek status, atau /model auto. Sementara: **TeleAgent AI** ✨`;
+          }
+          recordUsage("completed");
+          metrics.agentRunsSuccess.inc();
+          recordRunDuration(Date.now() - started);
+          yield { type: "state", state: "completed" };
+          yield { type: "completed", summary: helpSummary, filesChanged: [] };
+          done = true;
+          break;
+        }
+        // For coding tasks, do triage then explain
         yield* this.deterministicProbe(input, filesChanged);
         recordUsage("completed");
         metrics.agentRunsSuccess.inc();
         recordRunDuration(Date.now() - started);
         yield { type: "state", state: "completed" };
-        yield { type: "completed", summary: "Provider unreachable — performed read-only workspace triage instead. Configure a provider key to enable full autonomous edits.", filesChanged };
+        const triageNote = isFreeTier
+          ? `Provider error (FreeTier): model \`${this.ctx.model}\` cuma di OpenCode. Ganti /model auto.\n\nWorkspace triage di bawah:`
+          : "Provider unreachable — workspace triage di bawah. Cek PROVIDER_API_KEY / /doctor.";
+        yield { type: "completed", summary: `${triageNote}`, filesChanged };
         done = true;
         break;
       }

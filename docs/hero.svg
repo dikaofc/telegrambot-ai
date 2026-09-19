@@ -1,96 +1,704 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img">
-<defs>
-  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0%" stop-color="#0d1117"/><stop offset="100%" stop-color="#161b22"/>
-  </linearGradient>
-  <linearGradient id="grad" x1="0" y1="0" x2="1" y2="0">
-    <stop offset="0%" stop-color="#2f81f7"/><stop offset="50%" stop-color="#8a5cf6"/><stop offset="100%" stop-color="#f778ba"/>
-  </linearGradient>
-  <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%" stop-color="#21262d"/><stop offset="100%" stop-color="#161b22"/>
-  </linearGradient>
-  <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-</defs>
-<rect width="960" height="420" rx="20" fill="url(#bg)" stroke="#30363d"/>
-<!-- subtle grid -->
-<g opacity="0.06" stroke="#8b949e" stroke-width="0.6">
-  <path d="M0 70 H960 M0 140 H960 M0 210 H960 M0 280 H960 M0 350 H960 M80 0 V420 M200 0 V420 M340 0 V420 M500 0 V420 M640 0 V420 M800 0 V420"/>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 960 420"
+     width="100%"
+     height="auto"
+     role="img"
+     aria-labelledby="title desc">
 
-<!-- top badge -->
-<g transform="translate(32,28)">
-  <rect width="170" height="26" rx="13" fill="#1f6feb" opacity="0.15"/>
-  <rect width="170" height="26" rx="13" fill="none" stroke="#1f6feb" opacity="0.5"/>
-  <circle cx="14" cy="13" r="5" fill="#3fb950"><animate attributeName="opacity" values="1;0.4;1" dur="1.6s" repeatCount="indefinite"/></circle>
-  <text x="26" y="17" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#58a6ff" letter-spacing="0.6">SUPER-HARNESS • LIVE</text>
-</g>
+  <title id="title">TeleAgent — Super Harness</title>
+  <desc id="desc">
+    Telegram interface connected to an AI coding agent with tools,
+    planning, execution and verification.
+  </desc>
 
-<!-- left: title -->
-<g transform="translate(32,72)">
-  <text font-family="Inter, system-ui, sans-serif" font-size="42" font-weight="900" fill="white" letter-spacing="-1.5">Tele<tspan fill="url(#grad)">Agent</tspan></text>
-  <text y="42" font-family="Inter, system-ui, sans-serif" font-size="13.5" fill="#8b949e">Telegram is the UI. The harness is the superpower.</text>
-  <text y="62" font-family="JetBrains Mono, monospace" font-size="11" fill="#6e7681">70+ tools • scout subagents • knowledge graph • PTY • auto-checkpoint</text>
-  <!-- pill stats -->
-  <g transform="translate(0,82)">
-    <rect width="108" height="28" rx="14" fill="#21262d" stroke="#30363d"/>
-    <text x="14" y="18" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#e6edf3">70+ tools</text>
-    <g transform="translate(120,0)">
-      <rect width="118" height="28" rx="14" fill="#21262d" stroke="#30363d"/>
-      <text x="12" y="18" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#e6edf3">21 /commands</text>
-    </g>
-    <g transform="translate(250,0)">
-      <rect width="132" height="28" rx="14" fill="#21262d" stroke="#30363d"/>
-      <text x="12" y="18" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#e6edf3">dashboard :49374</text>
-    </g>
+  <defs>
+
+    <!-- background -->
+    <linearGradient id="bg"
+                    x1="0"
+                    y1="0"
+                    x2="1"
+                    y2="1">
+      <stop offset="0%" stop-color="#0b0e13"/>
+      <stop offset="100%" stop-color="#11161d"/>
+    </linearGradient>
+
+    <!-- accent -->
+    <linearGradient id="accent"
+                    x1="0"
+                    y1="0"
+                    x2="1"
+                    y2="0">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="50%" stop-color="#a371f7"/>
+      <stop offset="100%" stop-color="#f778ba"/>
+    </linearGradient>
+
+    <!-- card -->
+    <linearGradient id="card"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1">
+      <stop offset="0%" stop-color="#191e26"/>
+      <stop offset="100%" stop-color="#10141a"/>
+    </linearGradient>
+
+    <!-- subtle glow -->
+    <filter id="softGlow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%">
+
+      <feGaussianBlur
+        stdDeviation="5"
+        result="blur"/>
+
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+
+    </filter>
+
+    <!-- card shadow -->
+    <filter id="shadow"
+            x="-30%"
+            y="-30%"
+            width="160%"
+            height="160%">
+
+      <feDropShadow
+        dx="0"
+        dy="10"
+        stdDeviation="16"
+        flood-color="#000000"
+        flood-opacity=".35"/>
+
+    </filter>
+
+    <!-- phone content clip -->
+    <clipPath id="phoneClip">
+
+      <rect
+        x="12"
+        y="12"
+        width="386"
+        height="276"
+        rx="14"/>
+
+    </clipPath>
+
+  </defs>
+
+
+  <!-- =========================================================
+       BACKGROUND
+  ========================================================== -->
+
+  <rect
+    width="960"
+    height="420"
+    rx="22"
+    fill="url(#bg)"
+    stroke="#252b34"/>
+
+
+  <!-- subtle grid -->
+
+  <g
+    opacity=".035"
+    stroke="#c9d1d9"
+    stroke-width=".7">
+
+    <path d="M0 70H960"/>
+    <path d="M0 140H960"/>
+    <path d="M0 210H960"/>
+    <path d="M0 280H960"/>
+    <path d="M0 350H960"/>
+
+    <path d="M80 0V420"/>
+    <path d="M200 0V420"/>
+    <path d="M340 0V420"/>
+    <path d="M500 0V420"/>
+    <path d="M640 0V420"/>
+    <path d="M800 0V420"/>
+
   </g>
-</g>
 
-<!-- right: phone mock with typing animation -->
-<g transform="translate(520,64)">
-  <rect width="410" height="300" rx="22" fill="url(#cardGrad)" stroke="#30363d"/>
-  <rect x="12" y="12" width="386" height="38" rx="12" fill="#0d1117" stroke="#21262d"/>
-  <circle cx="32" cy="31" r="7" fill="#3fb950"/><circle cx="50" cy="31" r="7" fill="#d29922"/><circle cx="68" cy="31" r="7" fill="#f85149"/>
-  <text x="200" y="35" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#8b949e">Telegram • TeleAgent</text>
-  <!-- chat bubbles -->
-  <g font-family="Inter, system-ui, sans-serif" font-size="11">
-    <rect x="18" y="64" width="260" height="36" rx="12" fill="#21262d" stroke="#30363d"/>
-    <text x="32" y="86" fill="#e6edf3">siapa kamu? jawab 3 kata</text>
-    <rect x="130" y="112" width="268" height="36" rx="12" fill="#1f6feb"/>
-    <text x="146" y="134" fill="white" font-weight="700">Aku TeleAgent AI ✨</text>
-    <rect x="18" y="160" width="300" height="36" rx="12" fill="#21262d" stroke="#30363d"/>
-    <text x="32" y="182" fill="#e6edf3">bikin auth yang aman + test</text>
-    <g>
-      <rect x="130" y="208" width="268" height="60" rx="12" fill="#1f6feb"/>
-      <text x="146" y="228" fill="white" font-weight="600">🧠 planning → 🔎 scout</text>
-      <text x="146" y="244" fill="white" opacity="0.9">🛠 editing → ▶️ testing</text>
-      <text x="146" y="260" fill="white" opacity="0.85">✅ 24/24 tests passed</text>
-      <!-- typing dots -->
-      <g transform="translate(360,250)">
-        <circle r="3" fill="white" opacity="0.9"><animate attributeName="cy" values="0;-4;0" dur="0.9s" repeatCount="indefinite"/></circle>
-        <circle cx="8" r="3" fill="white" opacity="0.7"><animate attributeName="cy" values="0;-4;0" dur="0.9s" begin="0.15s" repeatCount="indefinite"/></circle>
-        <circle cx="16" r="3" fill="white" opacity="0.5"><animate attributeName="cy" values="0;-4;0" dur="0.9s" begin="0.3s" repeatCount="indefinite"/></circle>
+
+  <!-- =========================================================
+       TOP STATUS BADGE
+  ========================================================== -->
+
+  <g transform="translate(32 28)">
+
+    <rect
+      width="170"
+      height="26"
+      rx="13"
+      fill="#58a6ff"
+      fill-opacity=".07"
+      stroke="#58a6ff"
+      stroke-opacity=".25"/>
+
+    <circle
+      cx="14"
+      cy="13"
+      r="4"
+      fill="#3fb950">
+
+      <animate
+        attributeName="opacity"
+        values="1;.35;1"
+        dur="2s"
+        repeatCount="indefinite"/>
+
+    </circle>
+
+    <text
+      x="26"
+      y="17"
+      fill="#79c0ff"
+      font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
+      font-size="10"
+      font-weight="700"
+      letter-spacing=".7">
+
+      SUPER-HARNESS • LIVE
+
+    </text>
+
+  </g>
+
+
+  <!-- =========================================================
+       LEFT HERO
+       FIXED SPACING
+  ========================================================== -->
+
+  <g transform="translate(32 82)">
+
+    <!-- title -->
+
+    <text
+      x="0"
+      y="0"
+      fill="#f0f6fc"
+      font-family="Inter,ui-sans-serif,system-ui,sans-serif"
+      font-size="42"
+      font-weight="850"
+      letter-spacing="-1.8"
+      dominant-baseline="hanging">
+
+      Tele<tspan fill="url(#accent)">Agent</tspan>
+
+    </text>
+
+
+    <!-- subtitle -->
+
+    <text
+      x="0"
+      y="48"
+      fill="#8b949e"
+      font-family="Inter,ui-sans-serif,system-ui,sans-serif"
+      font-size="13.5">
+
+      Telegram is the UI. The harness is the superpower.
+
+    </text>
+
+
+    <!-- description -->
+
+    <text
+      x="0"
+      y="68"
+      fill="#6e7681"
+      font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
+      font-size="10.5">
+
+      70+ tools • scout subagents • knowledge graph • PTY • checkpoints
+
+    </text>
+
+
+    <!-- =======================================================
+         STATS
+    ======================================================== -->
+
+    <g
+      transform="translate(0 88)"
+      font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
+      font-size="10.5"
+      font-weight="700">
+
+
+      <!-- tools -->
+
+      <g>
+
+        <rect
+          width="108"
+          height="28"
+          rx="14"
+          fill="#171c23"
+          stroke="#292f38"/>
+
+        <text
+          x="14"
+          y="18"
+          fill="#e6edf3">
+
+          70+ tools
+
+        </text>
+
       </g>
-    </g>
-  </g>
-  <!-- glow underline -->
-  <rect x="18" y="286" width="386" height="3" rx="1.5" fill="url(#grad)" opacity="0.9">
-    <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" repeatCount="indefinite"/>
-  </rect>
-</g>
 
-<!-- bottom: animated pipeline -->
-<g transform="translate(32,372)">
-  <g font-family="JetBrains Mono, monospace" font-size="10" fill="#8b949e">
-    <text x="0" y="0">you → </text>
-    <tspan fill="#58a6ff" font-weight="700">understand</tspan><tspan> → </tspan><tspan fill="#a371f7">plan</tspan><tspan> → </tspan><tspan fill="#3fb950">tools</tspan><tspan> → </tspan><tspan fill="#f778ba">execute</tspan><tspan> → </tspan><tspan fill="#58a6ff">verify</tspan><tspan> → </tspan><tspan fill="#3fb950">done ✓</tspan>
+
+      <!-- commands -->
+
+      <g transform="translate(120 0)">
+
+        <rect
+          width="118"
+          height="28"
+          rx="14"
+          fill="#171c23"
+          stroke="#292f38"/>
+
+        <text
+          x="12"
+          y="18"
+          fill="#e6edf3">
+
+          21 commands
+
+        </text>
+
+      </g>
+
+
+      <!-- dashboard -->
+
+      <g transform="translate(250 0)">
+
+        <rect
+          width="132"
+          height="28"
+          rx="14"
+          fill="#171c23"
+          stroke="#292f38"/>
+
+        <text
+          x="12"
+          y="18"
+          fill="#e6edf3">
+
+          dashboard :49374
+
+        </text>
+
+      </g>
+
+    </g>
+
   </g>
-  <!-- moving dot -->
-  <g>
-    <circle r="3" fill="#58a6ff" filter="url(#glow)"><animateMotion path="M 0 10 H 760" dur="3s" repeatCount="indefinite" rotate="auto"/></circle>
+
+
+  <!-- =========================================================
+       TELEGRAM WINDOW
+  ========================================================== -->
+
+  <g
+    transform="translate(520 64)"
+    filter="url(#shadow)">
+
+
+    <!-- window -->
+
+    <rect
+      width="410"
+      height="300"
+      rx="22"
+      fill="url(#card)"
+      stroke="#2b323c"/>
+
+
+    <!-- window header -->
+
+    <rect
+      x="12"
+      y="12"
+      width="386"
+      height="38"
+      rx="12"
+      fill="#0b0e13"
+      stroke="#202630"/>
+
+
+    <!-- window controls -->
+
+    <circle
+      cx="32"
+      cy="31"
+      r="6"
+      fill="#3fb950"/>
+
+    <circle
+      cx="50"
+      cy="31"
+      r="6"
+      fill="#d29922"/>
+
+    <circle
+      cx="68"
+      cy="31"
+      r="6"
+      fill="#f85149"/>
+
+
+    <!-- header title -->
+
+    <text
+      x="205"
+      y="35"
+      text-anchor="middle"
+      fill="#8b949e"
+      font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
+      font-size="10.5">
+
+      Telegram · TeleAgent
+
+    </text>
+
+
+    <!-- =======================================================
+         CHAT CONTENT
+    ======================================================== -->
+
+    <g
+      clip-path="url(#phoneClip)"
+      font-family="Inter,ui-sans-serif,system-ui,sans-serif"
+      font-size="11">
+
+
+      <!-- user message 1 -->
+
+      <g>
+
+        <rect
+          x="18"
+          y="64"
+          width="260"
+          height="36"
+          rx="12"
+          fill="#191e26"
+          stroke="#282f38"/>
+
+        <text
+          x="32"
+          y="86"
+          fill="#e6edf3">
+
+          siapa kamu? jawab 3 kata
+
+        </text>
+
+      </g>
+
+
+      <!-- bot message 1 -->
+
+      <g>
+
+        <rect
+          x="130"
+          y="112"
+          width="268"
+          height="36"
+          rx="12"
+          fill="#1f6feb"/>
+
+        <text
+          x="146"
+          y="135"
+          fill="#ffffff"
+          font-weight="700">
+
+          Aku TeleAgent AI
+
+        </text>
+
+      </g>
+
+
+      <!-- user message 2 -->
+
+      <g>
+
+        <rect
+          x="18"
+          y="160"
+          width="300"
+          height="36"
+          rx="12"
+          fill="#191e26"
+          stroke="#282f38"/>
+
+        <text
+          x="32"
+          y="182"
+          fill="#e6edf3">
+
+          bikin auth yang aman + test
+
+        </text>
+
+      </g>
+
+
+      <!-- bot response -->
+
+      <g>
+
+        <rect
+          x="130"
+          y="208"
+          width="268"
+          height="60"
+          rx="12"
+          fill="#1f6feb"/>
+
+
+        <text
+          x="146"
+          y="228"
+          fill="#ffffff"
+          font-weight="600">
+
+          planning → scout
+
+        </text>
+
+
+        <text
+          x="146"
+          y="244"
+          fill="#ffffff"
+          opacity=".9">
+
+          editing → testing
+
+        </text>
+
+
+        <text
+          x="146"
+          y="260"
+          fill="#ffffff"
+          opacity=".82">
+
+          ✓ 24/24 tests passed
+
+        </text>
+
+
+        <!-- typing indicator -->
+
+        <g transform="translate(360 250)">
+
+          <circle
+            r="3"
+            fill="#ffffff">
+
+            <animate
+              attributeName="cy"
+              values="0;-4;0"
+              dur="1s"
+              repeatCount="indefinite"/>
+
+          </circle>
+
+
+          <circle
+            cx="8"
+            r="3"
+            fill="#ffffff"
+            opacity=".7">
+
+            <animate
+              attributeName="cy"
+              values="0;-4;0"
+              dur="1s"
+              begin=".15s"
+              repeatCount="indefinite"/>
+
+          </circle>
+
+
+          <circle
+            cx="16"
+            r="3"
+            fill="#ffffff"
+            opacity=".45">
+
+            <animate
+              attributeName="cy"
+              values="0;-4;0"
+              dur="1s"
+              begin=".3s"
+              repeatCount="indefinite"/>
+
+          </circle>
+
+        </g>
+
+      </g>
+
+    </g>
+
+
+    <!-- animated bottom accent -->
+
+    <rect
+      x="18"
+      y="286"
+      width="386"
+      height="2"
+      rx="1"
+      fill="url(#accent)"
+      opacity=".75">
+
+      <animate
+        attributeName="opacity"
+        values=".35;.9;.35"
+        dur="2.5s"
+        repeatCount="indefinite"/>
+
+    </rect>
+
   </g>
-  <rect y="14" width="760" height="2" rx="1" fill="#21262d"/>
-  <rect y="14" height="2" rx="1" fill="url(#grad)" width="0">
-    <animate attributeName="width" values="0;760;0" dur="3s" repeatCount="indefinite"/>
-  </rect>
-</g>
+
+
+  <!-- =========================================================
+       PIPELINE
+  ========================================================== -->
+
+  <g transform="translate(32 372)">
+
+
+    <!-- pipeline text -->
+
+    <g
+      font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
+      font-size="10"
+      fill="#8b949e">
+
+      <text x="0" y="0">
+
+        you →
+
+        <tspan
+          fill="#79c0ff"
+          font-weight="700">
+          understand
+        </tspan>
+
+        →
+
+        <tspan
+          fill="#a371f7"
+          font-weight="700">
+          plan
+        </tspan>
+
+        →
+
+        <tspan
+          fill="#3fb950"
+          font-weight="700">
+          tools
+        </tspan>
+
+        →
+
+        <tspan
+          fill="#f778ba"
+          font-weight="700">
+          execute
+        </tspan>
+
+        →
+
+        <tspan
+          fill="#79c0ff"
+          font-weight="700">
+          verify
+        </tspan>
+
+        →
+
+        <tspan
+          fill="#3fb950"
+          font-weight="700">
+          done ✓
+        </tspan>
+
+      </text>
+
+    </g>
+
+
+    <!-- pipeline track -->
+
+    <rect
+      x="0"
+      y="14"
+      width="760"
+      height="2"
+      rx="1"
+      fill="#202630"/>
+
+
+    <!-- animated progress -->
+
+    <rect
+      x="0"
+      y="14"
+      width="0"
+      height="2"
+      rx="1"
+      fill="url(#accent)">
+
+      <animate
+        attributeName="width"
+        values="0;760;0"
+        dur="3.8s"
+        repeatCount="indefinite"/>
+
+    </rect>
+
+
+    <!-- moving node -->
+
+    <circle
+      cx="0"
+      cy="15"
+      r="3"
+      fill="#79c0ff"
+      filter="url(#softGlow)">
+
+      <animateMotion
+        path="M 0 0 H 760"
+        dur="3.8s"
+        repeatCount="indefinite"/>
+
+    </circle>
+
+  </g>
+
 </svg>
