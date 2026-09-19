@@ -31,7 +31,10 @@ export function buildRegistry(): Map<string, ToolDefinition> {
   add(def("find_files", "Find by name", { name: "string" }, async (a, c) => findFiles(c.workspacePath, String(a.name))));
   add(def("grep", "Grep pattern", { pattern: "string" }, async (a, c) => grepCode(c.workspacePath, String(a.pattern))));
   add(def("search_code", "Search code (rg/grep)", { query: "string" }, async (a, c) => searchCode(c.workspacePath, String(a.query))));
-  add(def("shell", "Execute shell command (policy-gated)", { command: "string", timeoutMs: "number?" }, async (a, c): Promise<ToolResult> => execCommand(String(a.command), { cwd: c.workspacePath, timeoutMs: typeof a.timeoutMs === "number" ? a.timeoutMs as number : c.timeoutMs })));
+  add(def("shell", "Execute shell command (policy-gated)", { command: "string", timeoutMs: "number?" }, async (a, c): Promise<ToolResult> => {
+    if (typeof a.command !== "string" || !(a.command as string).trim()) return { success: false, error: "shell needs a non-empty 'command' string" };
+    return execCommand(String(a.command), { cwd: c.workspacePath, timeoutMs: typeof a.timeoutMs === "number" ? a.timeoutMs as number : c.timeoutMs });
+  }));
   add(def("git_status", "git status", {}, async (_a, c) => gitTools.status(c.workspacePath)));
   add(def("git_diff", "git diff", {}, async (_a, c) => gitTools.diff(c.workspacePath)));
   add(def("git_log", "git log", {}, async (_a, c) => gitTools.log(c.workspacePath)));
@@ -68,6 +71,7 @@ export function buildRegistry(): Map<string, ToolDefinition> {
     (await import("../workspace/manager.js")).assertInsideWorkspace(c.workspacePath, String(a.dest ?? "extracted")),
   )));
   add(def("shell_start", "Start a BACKGROUND shell session (dev servers, watch mode, long builds). Returns session id.", { command: "string" }, async (a, c) => {
+    if (typeof a.command !== "string" || !(a.command as string).trim()) return { success: false, error: "shell_start needs a non-empty 'command' string" };
     const { id } = ext.shellStart(String(a.command), c.workspacePath);
     return { success: true, output: `session ${id} started` };
   }));

@@ -62,6 +62,11 @@ export function createBot(): Bot {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is required");
   const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
+  // Never let a handler error stop polling (e.g. tapping an expired button).
+  bot.catch((err) => {
+    getLogger().error({ event: "bot.handler.error", err: String(err).slice(0, 500) }, "telegram handler error — polling continues");
+  });
+
   bot.use(async (ctx, next) => {
     const updateId = ctx.update.update_id;
     if (isDuplicateUpdate(updateId)) return; // duplicate protection
@@ -75,24 +80,32 @@ export function createBot(): Bot {
   setupBotCommands(bot, { runText: (ctx, text) => runAgentForMessage(ctx, text) });
 
   bot.on("callback_query:data", async (ctx) => {
+    // Expired taps (old messages, bot restarts) must never kill polling.
+    const answer = async (arg?: { text: string } | string): Promise<void> => {
+      try {
+        if (typeof arg === "string") await ctx.answerCallbackQuery({ text: arg });
+        else if (arg) await ctx.answerCallbackQuery(arg);
+        else await ctx.answerCallbackQuery({ text: "ok" });
+      } catch { /* query too old / invalid — safe to ignore */ }
+    };
     const data = ctx.callbackQuery.data;
     const userId = ctx.from.id;
-    if (!isAuthorized(userId, ctx.chat?.id).ok) { await ctx.answerCallbackQuery({ text: "unauthorized" }); return; }
+    if (!isAuthorized(userId, ctx.chat?.id).ok) { await answer({ text: "unauthorized" }); return; }
     try {
       if (data.startsWith("run:stop:")) {
         const runId = data.split(":")[2] as string;
         await stopRun(runId);
-        await ctx.answerCallbackQuery({ text: "stopping…" });
+        await answer({ text: "stopping…" });
         await ctx.editMessageText("🛑 stopping run…");
       } else if (data.startsWith("run:pause:")) {
         const runId = data.split(":")[2] as string;
         const ok = await pauseRun(runId);
-        await ctx.answerCallbackQuery({ text: ok ? "dijeda" : "nggak ada task" });
+        await answer({ text: ok ? "dijeda" : "nggak ada task" });
         if (ok) await ctx.editMessageText("⏸ Dijeda — kirim resume buat lanjut");
       } else if (data.startsWith("run:resume:")) {
         const runId = data.split(":")[2] as string;
         const ok = await resumeRun(runId);
-        await ctx.answerCallbackQuery({ text: ok ? "dilanjut" : "nggak ada" });
+        await answer({ text: ok ? "dilanjut" : "nggak ada" });
         if (ok) await ctx.editMessageText("▶️ Lanjut lagi!");
       } else if (data.startsWith("run:diff:")) {
         const telegramId = String(userId);
@@ -103,7 +116,7 @@ export function createBot(): Bot {
         const wsPath = s ? (store.getWorkspaceById(s.workspace_id) as { path: string } | undefined)?.path ?? resolveWorkspacePath("default") : resolveWorkspacePath("default");
         const { gitTools } = await import("../tools/git.js");
         const diff = await gitTools.diff(wsPath, ["--stat"]);
-        await ctx.answerCallbackQuery({ text: "diff" });
+        await answer({ text: "diff" });
         await ctx.reply(diff.success ? `📄 <b>Perubahan:</b>\n<pre>${(diff.output ?? "").slice(0, 3500).replace(/</g, "&lt;")}</pre>` : `Gagal ambil diff — ${diff.error}`, { parse_mode: "HTML" });
       } else if (data.startsWith("run:logs:")) {
         const telegramId = String(userId);
@@ -111,10 +124,10 @@ export function createBot(): Bot {
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
         const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         const last = store.lastRunForSession(sessionId) as { id: string } | undefined;
-        if (!last) { await ctx.answerCallbackQuery({ text: "no runs yet" }); return; }
+        if (!last) { await answer({ text: "no runs yet" }); return; }
         const calls = store.toolCallsForRun(last.id, 15);
         const lines = calls.map((t) => `${t.success ? "✓" : "✗"} ${t.tool} [${t.risk}]`).join("\n") || "(no tool calls)";
-        await ctx.answerCallbackQuery({ text: "logs" });
+        await answer({ text: "logs" });
         await ctx.reply(`🧾 <b>Log terakhir:</b>\n<pre>${lines.slice(0, 3500).replace(/</g, "&lt;")}</pre>`, { parse_mode: "HTML" });
       } else if (data.startsWith("run:retry:")) {
         const telegramId = String(userId);
@@ -122,18 +135,18 @@ export function createBot(): Bot {
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
         const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         const last = store.lastUserMessage(sessionId);
-        await ctx.answerCallbackQuery({ text: last ? "retrying" : "nothing to retry" });
+        await answer({ text: last ? "retrying" : "nothing to retry" });
         if (last) await runAgentForMessage(ctx as unknown as Context, last);
       } else if (data.startsWith("appr:ok:") || data.startsWith("appr:no:")) {
         const approvalId = data.split(":")[2] as string;
         store.resolveApproval(approvalId, data.startsWith("appr:ok:") ? "approved" : "rejected");
-        await ctx.answerCallbackQuery({ text: data.startsWith("appr:ok:") ? "approved" : "rejected" });
+        await answer({ text: data.startsWith("appr:ok:") ? "approved" : "rejected" });
         await ctx.editMessageText(data.startsWith("appr:ok:") ? "✅ approved — resuming…" : "❌ rejected — agent will work around it.");
       } else if (data === "set:model") {
-        await ctx.answerCallbackQuery({ text: "model" });
+        await answer({ text: "model" });
         await ctx.reply("🤖 <b>Ganti Model</b>\n\nKetik: <code>/model nama-model</code>\nContoh: <code>/model oc/muse-spark-1.2-contributor-free</code>\nAtau natural: <i>pakai model minimax</i>", { parse_mode: "HTML" });
       } else if (data === "set:provider") {
-        await ctx.answerCallbackQuery({ text: "provider" });
+        await answer({ text: "provider" });
         const { providerKeyboard } = await import("./keyboards.js");
         const { availableProviders } = await import("../providers/factory.js");
         await ctx.reply("🔌 <b>Pilih Provider</b> — mau pakai yang mana?", { parse_mode: "HTML", reply_markup: { inline_keyboard: providerKeyboard(availableProviders()) } });
@@ -144,16 +157,16 @@ export function createBot(): Bot {
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
         const sessionId = ensureSession(dbUser, chatDb, null, null, null);
         store.updateSession(sessionId, { provider });
-        await ctx.answerCallbackQuery({ text: `provider ${provider}` });
+        await answer({ text: `provider ${provider}` });
         await ctx.editMessageText(`🔌 provider updated → <b>${provider}</b>`, { parse_mode: "HTML" });
       } else if (data === "set:workspace") {
-        await ctx.answerCallbackQuery({ text: "workspace" });
+        await answer({ text: "workspace" });
         await ctx.reply("📁 <b>Ganti Workspace</b>\n\nKetik: <code>/workspace nama-project</code>\nAtau: <i>buka project 9router</i>", { parse_mode: "HTML" });
       } else if (data === "set:perms") {
-        await ctx.answerCallbackQuery({ text: "permissions" });
+        await answer({ text: "permissions" });
         await ctx.reply("🛡 <b>Izin</b>\n\n• <code>git push</code> → butuh approval\n• <code>rm -rf /</code> → diblokir\n\nUbah: ketik <i>jangan push tanpa izin</i>", { parse_mode: "HTML" });
       } else if (data === "set:memory") {
-        await ctx.answerCallbackQuery({ text: "memory" });
+        await answer({ text: "memory" });
         const telegramId = String(userId);
         const dbUser = store.upsertUser(telegramId, ctx.from?.username);
         const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
@@ -161,24 +174,24 @@ export function createBot(): Bot {
         const mem = store.getMemory("session", sessionId);
         await ctx.reply(`💾 <b>Memory</b> session ini:\n<pre>${JSON.stringify(mem, null, 2).slice(0, 3000).replace(/</g, "&lt;")}</pre>`, { parse_mode: "HTML" });
       } else if (data === "set:notif") {
-        await ctx.answerCallbackQuery({ text: "notifications" });
+        await answer({ text: "notifications" });
         await ctx.reply("🔔 <b>Notifikasi</b>\n\nSemua status & approval masuk ke chat ini", { parse_mode: "HTML" });
       } else if (data === "set:access") {
-        await ctx.answerCallbackQuery({ text: "access" });
+        await answer({ text: "access" });
         await ctx.reply(`👤 <b>Access</b>\n\nmode: <code>${getEnv().BOT_ACCESS_MODE}</code>\nowner: <code>${getEnv().OWNER_IDS}</code>\n\nUbah via .env: <code>BOT_ACCESS_MODE=owner|private|public|allowlist</code>`, { parse_mode: "HTML" });
       } else if (data === "set:agent") {
-        await ctx.answerCallbackQuery({ text: "agent" });
+        await answer({ text: "agent" });
         await ctx.reply(`⚙️ <b>Agent</b>\n\nprovider: <code>${getEnv().PROVIDER}</code>\nmodel: <code>${getEnv().DEFAULT_MODEL}</code>\n\nGanti: <code>/model …</code> atau <code>/provider …</code>`, { parse_mode: "HTML" });
       } else if (data.startsWith("setup:")) {
-        await ctx.answerCallbackQuery({ text: `provider: ${data.split(":")[1]}` });
+        await answer({ text: `provider: ${data.split(":")[1]}` });
         await ctx.reply("Kirim: <code>endpoint=... apikey=... model=...</code>", { parse_mode: "Markdown" });
       } else if (data === "file:read") {
-        await ctx.answerCallbackQuery({ text: "baca file" });
+        await answer({ text: "baca file" });
         await ctx.reply("📖 Coba ketik: <i>baca file uploads/nama.md dong</i> — langsung dibacain", { parse_mode: "HTML" });
       } else {
-        await ctx.answerCallbackQuery({ text: "ok" });
+        await answer({ text: "ok" });
       }
-    } catch (e) { await ctx.answerCallbackQuery({ text: String(e).slice(0, 100) }); }
+    } catch (e) { await answer({ text: String(e).slice(0, 100) }); }
   });
 
   bot.on("message:text", async (ctx) => {
