@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentState } from "../runtime/types.js";
 import { progressBar } from "../utils/large-output.js";
+import { mdToHtml, wrapBlockquoteIfNeeded, splitHtml } from "./format.js";
 
 const STATE_EMOJI: Record<AgentState, string> = {
   idle: "💤", thinking: "🧠", planning: "🧠", reading: "🔎",
@@ -81,36 +82,59 @@ export function renderStatusMessage(snap: StatusSnapshot): string {
 }
 
 export function renderFinalSummary(o: { filesChanged: string[]; testsPassed?: number; durationMs: number; tokens: number; model: string; verification?: string; summary?: string }): string {
+  // Plain fallback (used if HTML fails) — keep for editMessageText fallback
   const mins = Math.floor(o.durationMs / 60000);
   const secs = Math.floor((o.durationMs % 60000) / 1000);
   const summaryBlock = o.summary?.trim() ? o.summary.trim().slice(0, 3500) : undefined;
-  // For pure chat (no files changed) show the LLM answer prominently at the top
   if (summaryBlock && o.filesChanged.length === 0) {
-    return [
-      summaryBlock,
-      "",
-      "---",
-      `model: ${o.model} · ${mins}m ${secs}s · ${(o.tokens / 1000).toFixed(1)}k tokens`,
-      o.verification ? "" : undefined,
-      o.verification,
-    ].filter((l) => l !== undefined).join("\n");
+    return [summaryBlock, "", "---", `model: ${o.model} · ${mins}m ${secs}s · ${(o.tokens / 1000).toFixed(1)}k tokens`, o.verification ? "" : undefined, o.verification].filter((l) => l !== undefined).join("\n");
   }
+  return [summaryBlock ? summaryBlock : undefined, summaryBlock ? "" : undefined, summaryBlock ? "---" : undefined, summaryBlock ? "" : undefined, "✅ task completed", "", `model: ${o.model}`, `duration: ${mins}m ${secs}s`, `tokens: ${(o.tokens / 1000).toFixed(1)}k`, `files changed: ${o.filesChanged.length}`, o.filesChanged.length ? o.filesChanged.slice(0, 15).map((f) => `- ${f}`).join("\n") : undefined, o.verification ? "" : undefined, o.verification].filter((l) => l !== undefined).join("\n");
+}
+
+export function renderFinalSummaryHtml(o: { filesChanged: string[]; testsPassed?: number; durationMs: number; tokens: number; model: string; verification?: string; summary?: string }): string {
+  const mins = Math.floor(o.durationMs / 60000);
+  const secs = Math.floor((o.durationMs % 60000) / 1000);
+  const rawSummary = o.summary?.trim() ? o.summary.trim().slice(0, 8000) : undefined;
+  const summaryHtml = rawSummary ? wrapBlockquoteIfNeeded(mdToHtml(rawSummary)) : undefined;
+  const meta = `<i>model: ${o.model} · ${mins}m ${secs}s · ${(o.tokens / 1000).toFixed(1)}k tokens</i>`;
+  const verificationHtml = o.verification ? mdToHtml(o.verification) : undefined;
+  if (summaryHtml && o.filesChanged.length === 0) {
+    return [summaryHtml, "", meta, verificationHtml ? "" : undefined, verificationHtml].filter((l) => l !== undefined).join("\n");
+  }
+  const filesHtml = o.filesChanged.length ? o.filesChanged.slice(0, 15).map((f) => `• <code>${f.replace(/</g, "&lt;")}</code>`).join("\n") : undefined;
   return [
-    summaryBlock ? summaryBlock : undefined,
-    summaryBlock ? "" : undefined,
-    summaryBlock ? "---" : undefined,
-    summaryBlock ? "" : undefined,
-    "✅ task completed",
+    summaryHtml ? summaryHtml : undefined,
+    summaryHtml ? "" : undefined,
+    "<b>✅ task completed</b>",
     "",
-    `model: ${o.model}`,
-    `duration: ${mins}m ${secs}s`,
-    `tokens: ${(o.tokens / 1000).toFixed(1)}k`,
-    `files changed: ${o.filesChanged.length}`,
-    o.filesChanged.length ? o.filesChanged.slice(0, 15).map((f) => `- ${f}`).join("\n") : undefined,
-    o.verification ? "" : undefined,
-    o.verification,
+    `<i>model:</i> <code>${o.model}</code>`,
+    `<i>duration:</i> ${mins}m ${secs}s  <i>tokens:</i> ${(o.tokens / 1000).toFixed(1)}k`,
+    `<i>files changed:</i> ${o.filesChanged.length}`,
+    filesHtml ? filesHtml : undefined,
+    verificationHtml ? "" : undefined,
+    verificationHtml,
+    "",
+    meta,
   ].filter((l) => l !== undefined).join("\n");
 }
+
+export function renderFailureHtml(o: { attempted: string[]; lastError: string; remains: string }): string {
+  return [
+    "<b>⚠️ task incomplete</b>",
+    "",
+    "<b>what happened:</b>",
+    `<blockquote>${mdToHtml(o.lastError.slice(0, 1500))}</blockquote>`,
+    "",
+    "<b>what was attempted:</b>",
+    ...o.attempted.slice(-8).map((a) => `• <code>${a.slice(0, 200).replace(/</g, "&lt;")}</code>`),
+    "",
+    "<b>what remains:</b>",
+    `<blockquote>${mdToHtml(o.remains.slice(0, 1000))}</blockquote>`,
+  ].join("\n");
+}
+
+export function splitFinalHtml(html: string): string[] { return splitHtml(html, 3800); }
 
 export function renderFailure(o: { attempted: string[]; lastError: string; remains: string }): string {
   return [

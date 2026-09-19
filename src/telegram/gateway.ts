@@ -8,7 +8,7 @@ import { checkMessageRate } from "../security/rate-limit.js";
 import { isDuplicateUpdate, markUpdateProcessed } from "../utils/idempotency.js";
 import { resolveWorkspacePath } from "../workspace/manager.js";
 import { startRun, stopRun, ensureSession, interpretControlMessage, sessionRunId, pauseRun, resumeRun } from "../agent/orchestrator.js";
-import { emptySnapshot, applyEvent, renderStatusMessage, renderFinalSummary, renderFailure } from "./renderer.js";
+import { emptySnapshot, applyEvent, renderStatusMessage, renderFinalSummary, renderFinalSummaryHtml, renderFailure, renderFailureHtml, splitFinalHtml } from "./renderer.js";
 import { runControlsKeyboard, approvalKeyboard, afterRunKeyboard, settingsKeyboard, setupKeyboard } from "./keyboards.js";
 import { truncateForTelegram, splitMessage } from "../utils/large-output.js";
 import { validateUploadSize, validateUploadExt, assertSafeArchiveEntry } from "../security/upload-validation.js";
@@ -225,13 +225,26 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
       if (ev.type === "completed") tokens += 100;
     }
     const duration = Date.now() - started;
-    // Strip noisy git: suffix from pure chat answers (native-runtime appends git diff --stat)
     if (lastSummary.includes("\n\ngit:\n")) lastSummary = lastSummary.split("\n\ngit:\n")[0].trim();
-    const finalText = renderFinalSummary({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
-    const { text: safe, truncated } = truncateForTelegram(finalText);
-    await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, safe, { reply_markup: { inline_keyboard: afterRunKeyboard(sessionId) } }));
-    if (truncated) {
-      await ctx.replyWithDocument(new InputFile(Buffer.from(finalText, "utf8"), "summary.txt"), { caption: "full summary" });
+    // Try HTML first (auto markdown + blockquote), fall back to plain on parse error
+    const finalHtml = renderFinalSummaryHtml({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
+    const htmlChunks = splitFinalHtml(finalHtml);
+    const firstChunk = htmlChunks[0] ?? finalHtml;
+    try {
+      await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, firstChunk, { parse_mode: "HTML", reply_markup: { inline_keyboard: afterRunKeyboard(sessionId) } }));
+    } catch {
+      const fallback = renderFinalSummary({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
+      const { text: safe2 } = truncateForTelegram(fallback);
+      await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, safe2, { reply_markup: { inline_keyboard: afterRunKeyboard(sessionId) } }));
+    }
+    // Remaining chunks (for long AI answers) as separate messages with same HTML mode
+    for (let i = 1; i < htmlChunks.length; i++) {
+      const chunk = htmlChunks[i] as string;
+      try { await ctx.reply(chunk, { parse_mode: "HTML" }); }
+      catch { await ctx.reply(chunk.replace(/<[^>]+>/g, "")); }
+    }
+    if (finalHtml.length > 3800 * htmlChunks.length) {
+      await ctx.replyWithDocument(new InputFile(Buffer.from(lastSummary || finalHtml, "utf8"), "summary.txt"), { caption: "full summary" });
     }
   } catch (e) {
     const msg = String(e);
@@ -239,8 +252,10 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
       await ctx.reply("⏳ I'm still working on the previous task — your message was noted. Send `stop` to cancel it.");
       return;
     }
-    const failure = renderFailure({ attempted, lastError: msg, remains: "workspace left as-is; no destructive retry was performed automatically" });
-    for (const chunk of splitMessage(failure)) await ctx.reply(chunk);
+    const failureHtml = renderFailureHtml({ attempted, lastError: msg, remains: "workspace left as-is; no destructive retry was performed automatically" });
+    for (const chunk of splitFinalHtml(failureHtml)) {
+      try { await ctx.reply(chunk, { parse_mode: "HTML" }); } catch { const f = renderFailure({ attempted, lastError: msg, remains: "workspace left as-is; no destructive retry was performed automatically" }); for (const c of splitMessage(f)) await ctx.reply(c); break; }
+    }
     try { await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `⚠️ task incomplete\n\n${msg.slice(0, 500)}`)); } catch { /* noop */ }
     log().error({ event: "telegram.run.failed", err: msg }, "agent run failed");
   }
