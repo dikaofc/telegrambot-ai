@@ -201,9 +201,12 @@ Settings:async v=>{
 Graphify:async v=>{
   const ws=(await api("/api/workspaces")).workspaces;
   const opts=ws.map(w=>'<option value="'+esc(w.name)+'">'+esc(w.name)+'</option>').join("");
-  v.innerHTML='<div class="panel"><h3>Knowledge Graph</h3><label>workspace</label><select id="g-ws">'+opts+'</select><div class="row"><button class="act" onclick="gStatus()">STATUS</button><button class="act" onclick="gBuild(false)">BUILD</button><button class="act ghost" onclick="gBuild(true)">UPDATE</button></div><pre id="g-out">Pilih workspace untuk cek status</pre></div>'
+  v.innerHTML='<div class="panel"><h3>Knowledge Graph</h3><label>workspace</label><select id="g-ws" onchange="gPreview()">'+opts+'</select><div class="row"><button class="act" onclick="gStatus()">STATUS</button><button class="act" onclick="gBuild(false)">BUILD</button><button class="act ghost" onclick="gBuild(true)">UPDATE</button><button class="act ghost" onclick="gPreview()">PREVIEW</button></div><pre id="g-out">Pilih workspace untuk cek status</pre></div>'
+  +'<div class="panel"><h3>Preview — Graph HTML (live)</h3><div style="border:4px solid var(--ink);background:#fff;min-height:320px;overflow:hidden"><iframe id="g-frame" style="width:100%;height:520px;border:0;display:block" src="about:blank"></iframe></div><div class="row" style="margin-top:10px"><button class="act ghost" onclick="gPreview()">REFRESH PREVIEW</button><a id="g-open" href="#" target="_blank" class="act ghost" style="text-decoration:none;display:inline-block">OPEN FULL</a></div><div id="g-preview-msg" style="font-weight:700;margin-top:8px"></div></div>'
+  +'<div class="panel"><h3>Report — GRAPH_REPORT.md (detail)</h3><pre id="g-report" style="max-height:420px">Belum ada report — build dulu</pre></div>'
   +'<div class="panel"><h3>Query</h3><input id="g-q" placeholder="what connects auth to database?"><div class="row"><button class="act" onclick="gQuery()">QUERY</button><button class="act ghost" onclick="gExplain()">EXPLAIN SYMBOL</button></div><label>path from → to</label><div class="row"><input id="g-a" placeholder="UserService" style="flex:1"><input id="g-b" placeholder="DatabasePool" style="flex:1"><button class="act" onclick="gPath()">PATH</button></div><pre id="g-qout"></pre></div>';
-}
+  setTimeout(gPreview,300);
+},
 };
 async function stopRun(id){await api("/api/runs/"+id+"/stop",{method:"POST"});refresh()}
 async function resolveAppr(id,st){await api("/api/approvals/"+id,{method:"POST",body:JSON.stringify({status:st})});refresh()}
@@ -218,8 +221,35 @@ async function saveProvider(){
     setTimeout(refresh,800);
   }catch(e){ if(msg) msg.textContent="Gagal: "+e.message; }
 }
-async function gStatus(){try{$("g-out").textContent=JSON.stringify(await api("/api/graphify/status?workspace="+encodeURIComponent($("g-ws").value)),null,2)}catch(e){$("g-out").textContent=e.message}}
-async function gBuild(u){$("g-out").textContent="Memproses — bisa beberapa menit";try{$("g-out").textContent=JSON.stringify(await api("/api/graphify/build",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,updateOnly:u})}),null,2)}catch(e){$("g-out").textContent=e.message}}
+async function gStatus(){
+  try{
+    const st=await api("/api/graphify/status?workspace="+encodeURIComponent($("g-ws").value));
+    $("g-out").textContent=JSON.stringify(st,null,2);
+    gPreview();
+  }catch(e){$("g-out").textContent=e.message}
+}
+async function gBuild(u){
+  $("g-out").textContent="Memproses — bisa beberapa menit";
+  try{
+    const r=await api("/api/graphify/build",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,updateOnly:u})});
+    $("g-out").textContent=JSON.stringify(r,null,2);
+    setTimeout(gPreview,800);
+  }catch(e){$("g-out").textContent=e.message}
+}
+async function gPreview(){
+  const ws=$("g-ws")?.value||"default";
+  const frame=$("g-frame"), msg=$("g-preview-msg"), open=$("g-open"), report=$("g-report");
+  if(frame){ frame.src="/api/graphify/html?workspace="+encodeURIComponent(ws); if(open) open.href="/api/graphify/html?workspace="+encodeURIComponent(ws); }
+  if(msg) msg.textContent="Memuat preview...";
+  try{
+    const rep=await api("/api/graphify/report?workspace="+encodeURIComponent(ws));
+    if(report) report.textContent=rep.report.slice(0,12000);
+    if(msg) msg.textContent="Preview & report loaded — "+new Date().toLocaleTimeString();
+  }catch(e){
+    if(report) report.textContent="Belum ada report — build dulu untuk generate GRAPH_REPORT.md";
+    if(msg) msg.textContent=e.message.includes("404")?"Belum ada graph.html — build dulu":"Gagal load preview";
+  }
+}
 async function gQuery(){$("g-qout").textContent="Mencari...";try{$("g-qout").textContent=(await api("/api/graphify/query",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,question:$("g-q").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
 async function gExplain(){$("g-qout").textContent="Menjelaskan...";try{$("g-qout").textContent=(await api("/api/graphify/explain",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,symbol:$("g-q").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}
 async function gPath(){$("g-qout").textContent="Menelusuri jalur...";try{$("g-qout").textContent=(await api("/api/graphify/path",{method:"POST",body:JSON.stringify({workspace:$("g-ws").value,from:$("g-a").value,to:$("g-b").value})})).output||"(empty)"}catch(e){$("g-qout").textContent=e.message}}

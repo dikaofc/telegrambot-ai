@@ -297,6 +297,34 @@ export async function buildApiServer() {
     const { explainNode } = await import("../integrations/graphify.js");
     return explainNode(resolveWorkspacePath(body.workspace ?? "default"), body.symbol);
   });
+  app.get("/api/graphify/html", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const q = (req.query as { workspace?: string }).workspace ?? "default";
+    const wsPath = resolveWorkspacePath(q);
+    const { default: fs } = await import("node:fs");
+    const { default: path } = await import("node:path");
+    const file = path.join(wsPath, "graphify-out", "graph.html");
+    if (!fs.existsSync(file)) {
+      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "graph.html belum ada — build dulu" });
+      return;
+    }
+    const html = fs.readFileSync(file, "utf8");
+    return (reply as unknown as { type(t: string): { send(x: string): void } }).type("text/html").send(html);
+  });
+  app.get("/api/graphify/report", async (req, reply) => {
+    if (!(await gate(req as never, reply as never))) return;
+    const q = (req.query as { workspace?: string }).workspace ?? "default";
+    const wsPath = resolveWorkspacePath(q);
+    const { default: fs } = await import("node:fs");
+    const { default: path } = await import("node:path");
+    const file = path.join(wsPath, "graphify-out", "GRAPH_REPORT.md");
+    if (!fs.existsSync(file)) {
+      (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "GRAPH_REPORT.md belum ada — build dulu" });
+      return;
+    }
+    const md = fs.readFileSync(file, "utf8").slice(0, 20000);
+    return { report: md };
+  });
 
   // ---- live diagram: workspace + file changes + graphify (real-time) ----
   app.get("/api/diagram", async (req, reply) => {
