@@ -98,6 +98,30 @@ Lebih banyak prompt yang langsung jalan:
 - token/cost per-run tercatat → dashboard Usage & `/usage` live beneran
 - `git --stat` ditempel di ringkasan selesai
 - gak ada `tool.started` palsu — event cuma dikirim setelah tool beneran dipanggil & hasilnya balik
+- run yang gagal **gak pernah** dilaporin sukses: `agent_runs_success` / `agent_runs_failed` / `agent_runs_degraded` di `/metrics` beda-beda dan dihitung dari hasil nyata
+
+---
+
+## 🧭 Agent loop — plan dulu, baru gerak
+
+Agent nggak langsung nembak tool. Tiap request dibikin **plan asli** (deterministik, gak butuh provider — jadi tetep ada walau upstream mati):
+
+```text
+objective → steps (discover → implement → verify → report)
+                 ├─ tools yang dipakai per step
+                 ├─ verification commands (dibaca dari project profile beneran)
+                 ├─ assumptions + risks
+                 └─ completion criteria
+```
+
+- **Adaptive, bukan kaku.** Kalau tool yang sama gagal `AGENT_REPLAN_AFTER` kali, plan direvisi: step gagal ditandai, step "diagnose" disisipin, pendekatan diganti. Kalau tetap mentok setelah 2 replan → berhenti dengan `blocked: <tool> failed N× …` + daftar yang udah dicoba + error terakhir. Nggak loop selamanya.
+- **Smart tool selection.** Chat = 0 tool. Analisa = read-only (search/graph/baca). Implementasi = read + write + shell + verify. **Tulis file baru kebuka setelah codebase dibaca** — biar gak ngarang.
+- **Context window nyata.** Output tool yang panjang dipotong head+tail, riwayat lama dilipat jadi ringkasan yang keliatan (`[context compacted — N …]`), dibatasi `AGENT_MAX_CONTEXT_CHARS`. Objective + turn terakhir gak pernah dibuang.
+- **Failure memory.** Pola gagal yang berulang (di-fingerprint, bebas secret) disimpen per-workspace, dipakai buat warning run berikutnya, dan ditutup otomatis begitu tool-nya sukses.
+- **Provider circuit breaker.** Provider yang gagal 3× berturut-turut di-skip selama cooldown (bukan 200 round-trip sia-sia per run), probe lagi begitu cooldown habis.
+- **Batasan keras.** `AGENT_MAX_STEPS` + `AGENT_TIMEOUT_MS` — kena limit = verification pass terakhir + laporan jujur (jalan atau gagal), bukan pura-pura beres.
+
+Plan bisa dilihat langsung: dashboard tab **Diagram → Agent Plan**, `GET /api/plan/:runId`, `GET /api/plan?sessionId=…`, `GET /v1/runs/:id` (field `plan`), atau TUI `plan [runId]`.
 
 ---
 

@@ -944,8 +944,13 @@ export async function toolGitStash(cwd: string, message?: string): Promise<ToolR
 
 export async function toolDoctor(): Promise<ToolResult> {
   try {
-    const { checkHealth } = await import("../observability/health.js");
-    return ok(JSON.stringify(await checkHealth(), null, 2).slice(0, 6000));
+    // Full PASS/WARN/FAIL diagnostics (disk, memory, node, provider, circuit,
+    // workspace, sandbox, pty, graphify) — not just the shallow health probe.
+    const { runDoctor, renderDoctorText } = await import("../observability/doctor.js");
+    const report = await runDoctor();
+    return report.status === "fail"
+      ? fail(renderDoctorText(report))
+      : ok(renderDoctorText(report));
   } catch (e) { return fail(String(e)); }
 }
 

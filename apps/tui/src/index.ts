@@ -26,6 +26,7 @@ const HELP = [
   "  settings               list settings",
   "  set <key> <value> [scope] [scopeId]   save setting (never secrets)",
   "  metrics                prometheus metrics",
+  "  plan [runId]           live agent plan (steps + verification)",
   "  doctor                 run doctor checks",
   "  help                   this help",
   "  quit                   exit",
@@ -68,6 +69,15 @@ async function handle(line: string, out: (s: string) => void): Promise<boolean> 
       break;
     }
     case "metrics": out(metricsText()); break;
+    case "plan": {
+      const { readPlanForRun, renderPlanText } = await import("../../../src/agent/planner.js");
+      const sid = (store.listSessions(1)[0] as { id: string } | undefined)?.id;
+      const target = rest[0] ?? (sid ? (store.lastRunForSession(sid) as { id: string } | undefined)?.id : undefined);
+      if (!target) { out("usage: plan [runId]  (no run found for the latest session)"); break; }
+      const plan = readPlanForRun(target);
+      out(plan ? renderPlanText(plan) : `no plan recorded for run ${target}`);
+      break;
+    }
     case "doctor": {
       const { runDoctor } = await import("../../../src/observability/doctor.js");
       out(JSON.stringify(await runDoctor(), null, 2));

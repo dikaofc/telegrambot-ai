@@ -67,33 +67,55 @@ export function enforceContextBudget(
   const rest = (system ? sized.slice(1) : sized).slice();
   const lastUserIdx = [...rest].reverse().findIndex((m) => m.role === "user");
   const newestUser = lastUserIdx >= 0 ? rest.length - 1 - lastUserIdx : -1;
+  const systemChars = system ? (system.content?.length ?? 0) + 16 : 0;
+  const sizeOf = (m: ChatMessage): number => (m.content?.length ?? 0) + 16;
+  const describe = (m: ChatMessage): string => `${m.role}: ${(m.content ?? "").replace(/\s+/g, " ").slice(0, 160)}`;
 
+  // Greedy: walk newest → oldest keeping what fits, always keeping the newest
+  // user turn. Then shrink until the window (including the compaction notice)
+  // genuinely fits, so the budget is a guarantee and not a hope.
+  const keep = new Array<boolean>(rest.length).fill(false);
   const absorbed: string[] = [];
-  const kept: ChatMessage[] = [];
-  let keptChars = system ? (system.content?.length ?? 0) + 16 : 0;
-  const budgetForRest = maxChars - keptChars;
-
+  let keptChars = systemChars;
   for (let i = rest.length - 1; i >= 0; i--) {
-    if (i === newestUser) { kept.unshift(rest[i] as ChatMessage); keptChars += (rest[i] as ChatMessage).content?.length ?? 0; continue; }
     const m = rest[i] as ChatMessage;
-    const size = (m.content?.length ?? 0) + 16;
-    if (keptChars + size <= budgetForRest) {
-      kept.unshift(m);
+    const size = sizeOf(m);
+    if (i === newestUser || keptChars + size <= maxChars) {
+      keep[i] = true;
       keptChars += size;
     } else {
-      absorbed.unshift(`${m.role}: ${(m.content ?? "").replace(/\s+/g, " ").slice(0, 160)}`);
+      absorbed.unshift(describe(m));
     }
   }
 
-  const summary: ChatMessage | undefined = absorbed.length > 0
-    ? {
-        role: "tool",
-        toolName: "context_compaction",
-        content: `[context compacted — ${absorbed.length} earlier message(s) folded to stay within the context budget]\n${absorbed.join("\n")}`.slice(0, 4_000),
-      }
-    : undefined;
+  // Shrink: drop the oldest *kept* evidence before the summary, never the newest user turn.
+  const droppable = rest.map((_, i) => i).filter((i) => keep[i] && i !== newestUser);
+  let summaryText = "";
+  const build = (): ChatMessage[] => {
+    const keptList = rest.filter((_, i) => keep[i]);
+    const summary: ChatMessage | undefined = summaryText
+      ? { role: "tool", toolName: "context_compaction", content: summaryText }
+      : undefined;
+    return system ? [system, ...(summary ? [summary] : []), ...keptList] : [...(summary ? [summary] : []), ...keptList];
+  };
+  const summaryFor = (n: number): string => {
+    if (n === 0) return "";
+    return `[context compacted — ${n} earlier message(s) folded to stay within the context budget]\n${absorbed.slice(-n).join("\n")}`;
+  };
 
-  const next = system ? [system, ...(summary ? [summary] : []), ...kept] : [...(summary ? [summary] : []), ...kept];
+  summaryText = summaryFor(absorbed.length);
+  while (totalChars(build()) > maxChars && droppable.length > 0) {
+    const idx = droppable.shift() as number;
+    keep[idx] = false;
+    absorbed.unshift(describe(rest[idx] as ChatMessage));
+    summaryText = summaryFor(absorbed.length);
+  }
+  // Still over budget → the notice itself has to give way (evidence beats commentary).
+  while (totalChars(build()) > maxChars && summaryText) {
+    summaryText = summaryText.length > 600 ? summaryText.slice(0, 600) : "";
+  }
+
+  const next = build();
   return { messages: next, chars: totalChars(next), compacted: absorbed.length, trimmed };
 }
 

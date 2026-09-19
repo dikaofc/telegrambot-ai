@@ -108,14 +108,15 @@ export function selectToolNames(taskKind: TaskKind, phase: PlanPhase, allNames?:
   if (taskKind === "chat") return [];
   const universe = allNames ? [...allNames] : Object.keys(CATEGORY);
   const visible = (n: string): boolean => {
-    if (n === "browser_navigate" || n === "browser_extract") return true; // registry filters worker availability
     const cat = categoryOf(n);
+    // Mutability always wins over category: a mutating tool is never handed out
+    // to a read-only phase, whatever bucket it sits in.
     const mutating = isMutatingTool(n);
     if (taskKind === "reasoning") return !mutating && (DISCOVER_CATEGORIES.includes(cat) || cat === "web");
     // coding
     if (phase === "implement") return true;
     if (phase === "verify") return !mutating || cat === "verify";
-    // discover / none: read-only, but keep verification tools out of discovery
+    // discover: read-only, and verification tools stay out until a change exists
     return !mutating && cat !== "verify" && cat !== "supply";
   };
   return universe.filter(visible);

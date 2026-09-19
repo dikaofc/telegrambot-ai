@@ -103,6 +103,17 @@ async function refresh(){
   const v=$("view");v.innerHTML="<div class=\\"panel\\"><b>Memuat data...</b> sebentar</div>";
   try{await VIEWS[cur](v)}catch(e){v.innerHTML="<div class=\\"panel\\"><pre>"+esc(e.message)+"</pre></div>"}
 }
+const STEP_ICON={completed:"✓",in_progress:"→",failed:"✗",skipped:"-",pending:"•"};
+function planText(p){
+  if(!p)return "";
+  const total=Math.max(p.steps.length,1);
+  const done=p.steps.filter(s=>s.status==="completed"||s.status==="skipped").length;
+  const lines=["objective: "+(p.objective||"(empty)"),"revision: "+p.revision+" · progress: "+done+"/"+p.steps.length+" ("+Math.round(done/total*100)+"%)",""];
+  for(const s of p.steps)lines.push(" "+(STEP_ICON[s.status]||"•")+" ["+s.phase+"] "+s.title+(s.note?" — "+s.note:""));
+  if(p.verification&&p.verification.length){lines.push("","verification:");for(const v of p.verification)lines.push(" - "+v);}
+  if(p.completionCriteria&&p.completionCriteria.length){lines.push("","completion criteria:");for(const c of p.completionCriteria)lines.push(" - "+c);}
+  return lines.join("\\n");
+}
 const VIEWS={
 Status:async v=>{
   const s=await api("/api/status");
@@ -132,6 +143,9 @@ Diagram:async v=>{
   } else {
     svg = '<div class="panel">Graph belum dibangun — buka tab Graphify lalu BUILD, atau tunggu agent yang otomatis build saat ada task. Status: '+(g? (g.built?"built":"not built"):"unknown")+'</div>';
   }
+  const planHtml = d.plan
+    ? '<div class="panel"><h3>Agent Plan — run '+esc(String(d.planRunId||"").slice(0,8))+'</h3><pre>'+esc(planText(d.plan))+'</pre></div>'
+    : '<div class="panel"><h3>Agent Plan</h3>Belum ada plan — jalankan task dulu. Plan asli dibuat agent saat run; tidak ada yang dipalsukan di sini.</div>';
   const wsOpts = ['default','telegrambot-ai'].map(n=>'<option value="'+n+'"'+(n===wsSel?' selected':"")+'>'+n+'</option>').join("");
   // also list real workspaces from API
   let wsList = "";
@@ -139,6 +153,7 @@ Diagram:async v=>{
   v.innerHTML='<div class="panel"><h3>Live Diagram — Workspace & File Activity</h3><div class="row"><label>Workspace</label><select id="diag-ws" onchange="localStorage.setItem(\\'diagram_ws\\',this.value);VIEWS.Diagram(document.getElementById(\\'view\\'))">'+(wsList||wsOpts)+'</select><label style="margin-left:8px"><input type="checkbox" id="diag-auto" checked> Auto refresh (3s)</label><span style="margin-left:auto;font-weight:800">Update: '+new Date(d.generatedAt).toLocaleTimeString()+'</span></div></div>'
   +'<div class="grid" style="grid-template-columns:1.2fr 1fr;gap:12px"><div class="panel"><h3>File Tree (live, 120 files)</h3><div style="max-height:380px;overflow:auto">'+treeHtml+'</div></div><div class="panel"><h3>Git Status</h3>'+gitHtml+'</div></div>'
   +'<div class="panel"><h3>Recent Runs (live)</h3><table><tr><th>id</th><th>input</th><th>status</th><th>time</th></tr>'+runsHtml+'</table></div>'
+  +planHtml
   +svg
   +'<div class="panel"><h3>Graphify Live</h3>'+gInfo+'<pre>'+esc(JSON.stringify(g,null,2))+'</pre></div>';
   // auto refresh if checked

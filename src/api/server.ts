@@ -9,6 +9,7 @@ import { listWorkspaces, resolveWorkspacePath, detectProjectProfile, type Projec
 import { availableProviders, createProvider } from "../providers/factory.js";
 import { startRun, stopRun, pauseRun, resumeRun, ensureSession, activeRunCount, sessionRunId, runIdForLookup } from "../agent/orchestrator.js";
 import { dispatchWebhookUpdate, webhookHandlerReady } from "../telegram/webhook-bus.js";
+import { readPlanForRun, renderPlanText } from "../agent/planner.js";
 import { dashboardPage } from "../dashboard/page.js";
 import { assertNotSecretKey } from "../tools/extended.js";
 
@@ -143,7 +144,7 @@ export async function buildApiServer() {
     const { id } = req.params as { id: string };
     const run = store.getRun(id);
     if (!run) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "run not found" }); return; }
-    return { run, active: runIdForLookup(id), toolCalls: store.toolCallsForRun(id, 50) };
+    return { run, active: runIdForLookup(id), plan: readPlanForRun(id), toolCalls: store.toolCallsForRun(id, 50) };
   });
   app.get("/v1/runs/:id/events", async (req, reply) => {
     if (!(await auth(req as never, reply as never))) return;
@@ -168,6 +169,24 @@ export async function buildApiServer() {
       provider: env.PROVIDER, model: env.DEFAULT_MODEL,
       access: env.BOT_ACCESS_MODE, workspace: env.WORKSPACE_ROOT,
     };
+  });
+
+  // ---- agent plan (real plan of a real run) ----
+  app.get("/api/plan/:runId", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const { runId } = req.params as { runId: string };
+    const plan = readPlanForRun(runId);
+    if (!plan) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "no plan for this run" }); return; }
+    return { plan, text: renderPlanText(plan) };
+  });
+  app.get("/api/plan", async (req, reply) => {
+    if (!(await auth(req as never, reply as never))) return;
+    const sessionId = (req.query as { sessionId?: string }).sessionId;
+    const run = store.lastRunForSession(sessionId ?? "") as { id: string } | undefined;
+    if (!run) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "no runs for this session" }); return; }
+    const plan = readPlanForRun(run.id);
+    if (!plan) { (reply as unknown as { code(n: number): { send(x: unknown): void } }).code(404).send({ error: "no plan for the latest run" }); return; }
+    return { runId: run.id, plan, text: renderPlanText(plan) };
   });
 
   const gate = async (req: never, reply: never): Promise<boolean> => auth(req as never, reply as never);
@@ -443,7 +462,10 @@ export async function buildApiServer() {
         graph = { nodes, edges };
       }
     } catch { /* no graph */ }
-    return { workspace: q, wsPath, tree, runs, toolCalls, graphStatus: g, graph, gitStat, generatedAt: new Date().toISOString() };
+    // Live plan of the most recent run — real state, not a mock timeline.
+    const latestRunId = (runs[0] as { id: string } | undefined)?.id;
+    const plan = latestRunId ? readPlanForRun(latestRunId) : null;
+    return { workspace: q, wsPath, tree, runs, toolCalls, plan, planRunId: latestRunId ?? null, graphStatus: g, graph, gitStat, generatedAt: new Date().toISOString() };
   });
 
   app.get("/v1/ws/sessions/:id", { websocket: true }, (socket: unknown, request: unknown) => {
