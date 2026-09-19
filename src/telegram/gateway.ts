@@ -75,14 +75,97 @@ export function createBot(): Bot {
         await stopRun(runId);
         await ctx.answerCallbackQuery({ text: "stopping…" });
         await ctx.editMessageText("🛑 stopping run…");
+      } else if (data.startsWith("run:pause:")) {
+        const runId = data.split(":")[2] as string;
+        const ok = await pauseRun(runId);
+        await ctx.answerCallbackQuery({ text: ok ? "paused" : "no active run" });
+        if (ok) await ctx.editMessageText("⏸ paused — send resume to continue");
+      } else if (data.startsWith("run:resume:")) {
+        const runId = data.split(":")[2] as string;
+        const ok = await resumeRun(runId);
+        await ctx.answerCallbackQuery({ text: ok ? "resumed" : "no paused run" });
+        if (ok) await ctx.editMessageText("▶️ resumed");
+      } else if (data.startsWith("run:diff:")) {
+        const telegramId = String(userId);
+        const dbUser = store.upsertUser(telegramId, ctx.from?.username);
+        const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
+        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const s = store.getSession(sessionId) as { workspace_id: string } | undefined;
+        const wsPath = s ? (store.getWorkspaceById(s.workspace_id) as { path: string } | undefined)?.path ?? resolveWorkspacePath("default") : resolveWorkspacePath("default");
+        const { gitTools } = await import("../tools/git.js");
+        const diff = await gitTools.diff(wsPath, ["--stat"]);
+        await ctx.answerCallbackQuery({ text: "diff" });
+        await ctx.reply(diff.success ? `📄 Diff:\n<pre>${(diff.output ?? "").slice(0, 3500).replace(/</g, "&lt;")}</pre>` : `diff failed: ${diff.error}`, { parse_mode: "HTML" });
+      } else if (data.startsWith("run:logs:")) {
+        const telegramId = String(userId);
+        const dbUser = store.upsertUser(telegramId, ctx.from?.username);
+        const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
+        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const last = store.lastRunForSession(sessionId) as { id: string } | undefined;
+        if (!last) { await ctx.answerCallbackQuery({ text: "no runs yet" }); return; }
+        const calls = store.toolCallsForRun(last.id, 15);
+        const lines = calls.map((t) => `${t.success ? "✓" : "✗"} ${t.tool} [${t.risk}]`).join("\n") || "(no tool calls)";
+        await ctx.answerCallbackQuery({ text: "logs" });
+        await ctx.reply(`🧾 Last run logs:\n<pre>${lines.slice(0, 3500).replace(/</g, "&lt;")}</pre>`, { parse_mode: "HTML" });
+      } else if (data.startsWith("run:retry:")) {
+        const telegramId = String(userId);
+        const dbUser = store.upsertUser(telegramId, ctx.from?.username);
+        const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
+        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const last = store.lastUserMessage(sessionId);
+        await ctx.answerCallbackQuery({ text: last ? "retrying" : "nothing to retry" });
+        if (last) await runAgentForMessage(ctx as unknown as Context, last);
       } else if (data.startsWith("appr:ok:") || data.startsWith("appr:no:")) {
         const approvalId = data.split(":")[2] as string;
         store.resolveApproval(approvalId, data.startsWith("appr:ok:") ? "approved" : "rejected");
         await ctx.answerCallbackQuery({ text: data.startsWith("appr:ok:") ? "approved" : "rejected" });
         await ctx.editMessageText(data.startsWith("appr:ok:") ? "✅ approved — resuming…" : "❌ rejected — agent will work around it.");
+      } else if (data === "set:model") {
+        await ctx.answerCallbackQuery({ text: "model" });
+        await ctx.reply("🤖 <b>Model</b>\n\nKirim: <code>/model nama-model</code>\nContoh: <code>/model oc/muse-spark-1.2-contributor-free</code> atau <code>cph/cehpoint-ai</code>\n\nAtau ketik natural: <i>pakai model minimax</i>", { parse_mode: "HTML" });
+      } else if (data === "set:provider") {
+        await ctx.answerCallbackQuery({ text: "provider" });
+        const { providerKeyboard } = await import("./keyboards.js");
+        const { availableProviders } = await import("../providers/factory.js");
+        await ctx.reply("🔌 <b>Pilih provider</b>", { parse_mode: "HTML", reply_markup: { inline_keyboard: providerKeyboard(availableProviders()) } });
+      } else if (data.startsWith("setp:")) {
+        const provider = data.split(":")[1] as string;
+        const telegramId = String(userId);
+        const dbUser = store.upsertUser(telegramId, ctx.from?.username);
+        const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
+        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        store.updateSession(sessionId, { provider });
+        await ctx.answerCallbackQuery({ text: `provider ${provider}` });
+        await ctx.editMessageText(`🔌 provider updated → <b>${provider}</b>`, { parse_mode: "HTML" });
+      } else if (data === "set:workspace") {
+        await ctx.answerCallbackQuery({ text: "workspace" });
+        await ctx.reply("📁 <b>Workspace</b>\n\nKirim: <code>/workspace nama-project</code>\nContoh: <code>/workspace my-project</code> atau natural: <i>buka project 9router</i>", { parse_mode: "HTML" });
+      } else if (data === "set:perms") {
+        await ctx.answerCallbackQuery({ text: "permissions" });
+        await ctx.reply("🛡 <b>Permissions</b>\n\n• <code>git push</code> → approval required (default)\n• <code>rm -rf /</code> → denied\n\nKetik: <i>jangan push tanpa izin</i> untuk ubah policy", { parse_mode: "HTML" });
+      } else if (data === "set:memory") {
+        await ctx.answerCallbackQuery({ text: "memory" });
+        const telegramId = String(userId);
+        const dbUser = store.upsertUser(telegramId, ctx.from?.username);
+        const chatDb = store.ensureChat(dbUser, String(ctx.chat?.id ?? ""));
+        const sessionId = ensureSession(dbUser, chatDb, "default", getEnv().PROVIDER, getEnv().DEFAULT_MODEL);
+        const mem = store.getMemory("session", sessionId);
+        await ctx.reply(`💾 <b>Memory</b> session ini:\n<pre>${JSON.stringify(mem, null, 2).slice(0, 3000).replace(/</g, "&lt;")}</pre>`, { parse_mode: "HTML" });
+      } else if (data === "set:notif") {
+        await ctx.answerCallbackQuery({ text: "notifications" });
+        await ctx.reply("🔔 <b>Notifications</b>\n\nSaat ini semua approval & status dikirim ke chat ini. Ketik <code>/settings</code> lagi untuk ubah.", { parse_mode: "HTML" });
+      } else if (data === "set:access") {
+        await ctx.answerCallbackQuery({ text: "access" });
+        await ctx.reply(`👤 <b>Access</b>\n\nmode: <code>${getEnv().BOT_ACCESS_MODE}</code>\nowner: <code>${getEnv().OWNER_IDS}</code>\n\nUbah via .env: <code>BOT_ACCESS_MODE=owner|private|public|allowlist</code>`, { parse_mode: "HTML" });
+      } else if (data === "set:agent") {
+        await ctx.answerCallbackQuery({ text: "agent" });
+        await ctx.reply(`⚙️ <b>Agent</b>\n\nprovider: <code>${getEnv().PROVIDER}</code>\nmodel: <code>${getEnv().DEFAULT_MODEL}</code>\n\nGanti: <code>/model …</code> atau <code>/provider …</code>`, { parse_mode: "HTML" });
       } else if (data.startsWith("setup:")) {
         await ctx.answerCallbackQuery({ text: `provider: ${data.split(":")[1]}` });
         await ctx.reply("Send: `endpoint=... apikey=... model=...`", { parse_mode: "Markdown" });
+      } else if (data === "file:read") {
+        await ctx.answerCallbackQuery({ text: "use /workspace + read_file" });
+        await ctx.reply("📖 Kirim natural: <i>baca file uploads/nama.md</i> — agent akan pakai <code>read_file</code> otomatis", { parse_mode: "HTML" });
       } else {
         await ctx.answerCallbackQuery({ text: "ok" });
       }
@@ -141,17 +224,51 @@ export function createBot(): Bot {
       assertSafeUrl(url, trusted);
       const r = await downloadFile(url, dest, 120_000, trusted);
       if (!r.success) { await ctx.reply(`❌ download failed: ${r.error}`); return; }
+      // Also copy to default workspace so agent (default) can see it via read_file
+      try {
+        const defaultWs = resolveWorkspacePath("default");
+        const { default: fs } = await import("node:fs");
+        const { default: path } = await import("node:path");
+        const copyDest = path.join(defaultWs, "uploads", doc.file_name ?? "upload.bin");
+        fs.mkdirSync(path.dirname(copyDest), { recursive: true });
+        fs.copyFileSync(dest, copyDest);
+      } catch { /* best-effort */ }
       const low = (doc.file_name ?? "").toLowerCase();
       if (low.endsWith(".zip") || low.endsWith(".tar.gz") || low.endsWith(".tgz") || low.endsWith(".tar")) {
         const { extractArchive } = await import("../tools/extended.js");
         const outDir = `${wsPath}/${(doc.file_name ?? "upload").replace(/\.(zip|tar\.gz|tgz|tar)$/i, "")}`;
         const ex = await extractArchive(dest, outDir);
         await ctx.reply(ex.success
-          ? `📦 received + extracted → ${doc.file_name}\n${ex.output}\nworkspace: ${wsName}\nTell me what to do with it.`
+          ? `📦 received + extracted → ${doc.file_name}\n${ex.output}\nworkspace: ${wsName} (also copied to default/uploads/)\nTell me what to do with it.`
           : `📦 received → ${doc.file_name}\n⚠️ auto-extract failed: ${ex.error}\nworkspace: ${wsName}`);
         return;
       }
-      await ctx.reply(`📦 received → ${doc.file_name}\nworkspace: ${wsName}\nTell me what to do with it.`);
+      // Text-like files: .md .txt .json .js .ts .py .log .diff .patch — show preview with blockquote + HTML
+      const textExts = [".md", ".txt", ".json", ".js", ".ts", ".py", ".log", ".diff", ".patch"];
+      const isText = textExts.some((e) => low.endsWith(e));
+      if (isText) {
+        try {
+          const { default: fs } = await import("node:fs");
+          const content = fs.readFileSync(dest, "utf8").slice(0, 8000);
+          const preview = content.slice(0, 3000);
+          const esc = preview.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const lang = low.endsWith(".md") ? "markdown" : low.endsWith(".json") ? "json" : low.endsWith(".py") ? "python" : low.endsWith(".js") || low.endsWith(".ts") ? "typescript" : "";
+          const codeBlock = lang ? `<pre><code class="language-${lang}">${esc}</code></pre>` : `<blockquote>${esc.slice(0, 2000)}</blockquote>`;
+          await ctx.reply(
+            `📄 <b>received → ${doc.file_name}</b>\n` +
+            `<i>workspace: ${wsName} & default/uploads/</i>\n` +
+            `<i>size: ${((doc.file_size ?? 0) / 1024).toFixed(1)} KB — agent bisa baca via <code>read_file</code></i>\n\n` +
+            `${codeBlock}\n\n` +
+            `<i>Tips: ketik natural</i> <code>baca file ${doc.file_name} dan jelaskan</code> <i>atau</i> <code>analisa file ini</code>`,
+            {
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: [[{ text: "📖 Baca file", callback_data: "file:read" }, { text: "🔍 Analisa", callback_data: "file:read" }]] },
+            },
+          );
+          return;
+        } catch { /* fall through to generic */ }
+      }
+      await ctx.reply(`📦 received → ${doc.file_name}\nworkspace: ${wsName} (also default/uploads/)\nTell me what to do with it.`);
     } catch (e) { await ctx.reply(`❌ upload failed: ${String(e).slice(0, 500)}`); }
   });
 
