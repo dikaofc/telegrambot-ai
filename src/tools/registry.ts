@@ -14,16 +14,38 @@ function def(name: string, description: string, schema: Record<string, unknown>,
   return { name, description, schema, execute };
 }
 
+/** Reject missing/garbage paths before they become files literally named "undefined". */
+function badPath(v: unknown): boolean {
+  return typeof v !== "string" || !v.trim() || v === "undefined" || v === "null" || v === "[object Object]";
+}
+
+function needPaths(a: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) if (badPath(a[k])) return `tool needs a valid '${k}' path (got ${JSON.stringify(a[k])?.slice(0, 60)})`;
+  return null;
+}
+
 export function buildRegistry(): Map<string, ToolDefinition> {
   const m = new Map<string, ToolDefinition>();
   const add = (d: ToolDefinition) => m.set(d.name, d);
 
-  add(def("read_file", "Read a file inside the workspace", { target: "string" }, async (a, c) => fsTools.readFile(c.workspacePath, String(a.target))));
-  add(def("write_file", "Write/create a file", { target: "string", content: "string" }, async (a, c) => fsTools.writeFile(c.workspacePath, String(a.target), String(a.content ?? ""))));
-  add(def("edit_file", "Edit a file by exact string replacement", { target: "string", oldText: "string", newText: "string" }, async (a, c) => fsTools.editFile(c.workspacePath, String(a.target), String(a.oldText), String(a.newText), Boolean(a.replaceAll))));
-  add(def("delete_file", "Delete a file", { target: "string" }, async (a, c) => fsTools.deleteFile(c.workspacePath, String(a.target))));
-  add(def("move_file", "Move a file", { src: "string", dest: "string" }, async (a, c) => fsTools.moveFile(c.workspacePath, String(a.src), String(a.dest))));
-  add(def("copy_file", "Copy a file", { src: "string", dest: "string" }, async (a, c) => fsTools.copyFile(c.workspacePath, String(a.src), String(a.dest))));
+  add(def("read_file", "Read a file inside the workspace", { target: "string" }, async (a, c) => {
+    const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.readFile(c.workspacePath, String(a.target));
+  }));
+  add(def("write_file", "Write/create a file", { target: "string", content: "string" }, async (a, c) => {
+    const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.writeFile(c.workspacePath, String(a.target), String(a.content ?? ""));
+  }));
+  add(def("edit_file", "Edit a file by exact string replacement", { target: "string", oldText: "string", newText: "string" }, async (a, c) => {
+    const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.editFile(c.workspacePath, String(a.target), String(a.oldText), String(a.newText), Boolean(a.replaceAll));
+  }));
+  add(def("delete_file", "Delete a file", { target: "string" }, async (a, c) => {
+    const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.deleteFile(c.workspacePath, String(a.target));
+  }));
+  add(def("move_file", "Move a file", { src: "string", dest: "string" }, async (a, c) => {
+    const e = needPaths(a, ["src", "dest"]); if (e) return { success: false, error: e }; return fsTools.moveFile(c.workspacePath, String(a.src), String(a.dest));
+  }));
+  add(def("copy_file", "Copy a file", { src: "string", dest: "string" }, async (a, c) => {
+    const e = needPaths(a, ["src", "dest"]); if (e) return { success: false, error: e }; return fsTools.copyFile(c.workspacePath, String(a.src), String(a.dest));
+  }));
   add(def("list_directory", "List directory", { target: "string?" }, async (a, c) => fsTools.listDirectory(c.workspacePath, String(a.target ?? "."))));
   add(def("file_exists", "Check existence", { target: "string" }, async (a, c) => fsTools.fileExists(c.workspacePath, String(a.target))));
   add(def("file_info", "File metadata", { target: "string" }, async (a, c) => fsTools.fileInfo(c.workspacePath, String(a.target))));

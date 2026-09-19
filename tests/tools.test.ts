@@ -36,6 +36,22 @@ describe("filesystem tools", () => {
       expect(reg.has(t)).toBe(true);
     }
   });
+  it("registry rejects garbage file targets (never creates 'undefined')", async () => {
+    const reg = buildRegistry();
+    const ctx = { workspacePath: ws, runId: "t", sessionId: "t", userId: "t" };
+    for (const [tool, args] of [
+      ["write_file", { content: "x" }],
+      ["write_file", { target: "undefined", content: "x" }],
+      ["edit_file", { target: "  ", oldText: "a", newText: "b" }],
+      ["delete_file", {}],
+      ["move_file", { src: "a.txt" }],
+      ["read_file", { target: undefined }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      const r = await reg.get(tool)!.execute(args, ctx);
+      expect(r.success, `${tool} ${JSON.stringify(args)}`).toBe(false);
+    }
+    expect(fs.existsSync(path.join(ws, "undefined"))).toBe(false);
+  });
 });
 
 describe("shell execution", () => {
