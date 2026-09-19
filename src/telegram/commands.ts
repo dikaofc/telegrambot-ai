@@ -78,7 +78,7 @@ function authed(ctx: Context): boolean {
   const userId = ctx.from?.id;
   if (userId === undefined) return false;
   const g = isAuthorized(userId, ctx.chat?.id);
-  if (!g.ok) { void ctx.reply(`⛔ unauthorized (${g.reason})`); return false; }
+  if (!g.ok) { void ctx.reply(`⛔ Belum ada akses — ${g.reason}`); return false; }
   return true;
 }
 
@@ -94,7 +94,7 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
     if (!authed(ctx)) return;
     const c = sessionCtx(ctx);
     await ctx.reply(
-      `🤖 TeleAgent\n\nstatus: ready\nprovider: ${c.provider}\nmodel: ${c.model}\nworkspace: ${c.wsPath}\n\nSend me anything — I understand natural language.\nType /help for full control commands.`,
+      `Hai, aku TeleAgent ✨\n\nSiap bantu kamu — tinggal ketik aja mau ngapain\n\nprovider: ${c.provider} • model: ${c.model}\nworkspace: ${c.wsPath}\n\nKetik /help kalau mau lihat semua perintah`,
       { reply_markup: { inline_keyboard: settingsKeyboard() } },
     );
   });
@@ -112,7 +112,13 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
     const runId = await activeRunId(c.sessionId);
     const last = store.lastRunForSession(c.sessionId) as { status: string } | undefined;
     await ctx.reply(
-      `📊 status\n\nprovider: ${c.provider}\nmodel: ${c.model}\nworkspace: ${c.wsPath}\nactive run: ${runId ?? "(idle)"}\nlast run: ${last?.status ?? "(none)"}\n\n/send anything to start working.`,
+      `📊 <b>Status</b>
+
+provider: <code>${c.provider}</code> • model: <code>${c.model}</code>
+workspace: <code>${c.wsPath}</code>
+lagi jalan: ${runId ? `<code>${runId.slice(0,8)}</code>` : "nggak ada"} • terakhir: ${last?.status ?? "belum ada"}
+
+Ketik aja mau ngapain — langsung jalan`,
     );
   });
 
@@ -124,51 +130,51 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
   bot.command("model", async (ctx) => {
     if (!authed(ctx)) return;
     const name = (ctx.match as string ?? "").trim();
-    if (!name) { await ctx.reply("usage: /model <name>\ncurrent: " + sessionCtx(ctx).model); return; }
+    if (!name) { await ctx.reply("Pakai: <code>/model nama-model</code>\nSekarang: " + sessionCtx(ctx).model); return; }
     const c = sessionCtx(ctx);
     store.updateSession(c.sessionId, { model: name.replace(/[^a-zA-Z0-9/_:.-]/g, "") });
-    await ctx.reply(`model preference updated:\n${name}\n(applies to this chat from now on)`);
+    await ctx.reply(`✅ Model diganti → <code>${name}</code> • langsung aktif di chat ini`);
   });
 
   bot.command("provider", async (ctx) => {
     if (!authed(ctx)) return;
     const name = ((ctx.match as string) ?? "").trim().toLowerCase();
     if (!KNOWN_PROVIDERS.includes(name)) {
-      await ctx.reply(`usage: /provider <${KNOWN_PROVIDERS.join("|")}>\ncurrent: ${sessionCtx(ctx).provider}`);
+      await ctx.reply(`Pakai: <code>/provider nama</code> (${KNOWN_PROVIDERS.join("|")})\nSekarang: ${sessionCtx(ctx).provider}`);
       return;
     }
     const c = sessionCtx(ctx);
     store.updateSession(c.sessionId, { provider: name });
-    await ctx.reply(`provider updated:\n${name}`);
+    await ctx.reply(`✅ Provider diganti → <code>${name}</code>`);
   });
 
   bot.command("workspace", async (ctx) => {
     if (!authed(ctx)) return;
     const name = ((ctx.match as string) ?? "").trim();
-    if (!name) { await ctx.reply("usage: /workspace <name>\ncurrent: " + sessionCtx(ctx).wsPath); return; }
+    if (!name) { await ctx.reply("Pakai: <code>/workspace nama</code>\nSekarang: " + sessionCtx(ctx).wsPath); return; }
     const c = sessionCtx(ctx);
     const p = resolveWorkspacePath(name);
     const wsId = store.ensureWorkspace(name, p, c.dbUser);
     store.updateSession(c.sessionId, { workspace_id: wsId });
-    await ctx.reply(`workspace updated:\n${name} → ${p}`);
+    await ctx.reply(`✅ Workspace pindah → <code>${name}</code> (<code>${p}</code>)`);
   });
 
   bot.command("new", async (ctx) => {
     if (!authed(ctx)) return;
     const c = sessionCtx(ctx);
     const id = store.createSession({ userId: c.dbUser, chatId: c.chatDb, workspaceId: c.workspaceId, provider: c.provider, model: c.model });
-    await ctx.reply(`🆕 fresh session started (${id.slice(0, 8)}). Previous history is kept in the database.`);
+    await ctx.reply(`🆕 Sesi baru dimulai (<code>${id.slice(0, 8)}</code>) — history lama tetap kesimpen`);
   });
 
   const control = (kind: "stop" | "pause" | "resume") => async (ctx: Context) => {
     if (!authed(ctx)) return;
     const c = sessionCtx(ctx);
     const runId = await activeRunId(c.sessionId);
-    if (!runId) { await ctx.reply("no active run"); return; }
+    if (!runId) { await ctx.reply("⏸ Lagi nggak ada task yang jalan"); return; }
     const ok = kind === "stop" ? await stopRun(runId) : kind === "pause" ? await pauseRun(runId) : await resumeRun(runId);
     await ctx.reply(ok
       ? kind === "stop" ? "🛑 cancelled. State persisted." : kind === "pause" ? "⏸ paused. State saved." : "▶️ resumed."
-      : "no active run (already finished?)");
+      : "⏸ Lagi nggak ada task yang jalan (already finished?)");
   };
   bot.command("stop", control("stop"));
   bot.command("cancel", control("stop"));
@@ -179,8 +185,9 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
     if (!authed(ctx)) return;
     const c = sessionCtx(ctx);
     const last = store.lastUserMessage(c.sessionId);
-    if (!last) { await ctx.reply("nothing to retry yet — send me a task first."); return; }
-    await ctx.reply(`🔁 retrying your last message:\n${last.slice(0, 300)}`);
+    if (!last) { await ctx.reply("Belum ada yang bisa di-retry — kirim task dulu ya"); return; }
+    await ctx.reply(`🔁 Oke, ngulang pesan terakhirmu:
+<code>${last.slice(0, 300)}</code>`);
     await deps.runText(ctx, last);
   });
 
@@ -202,7 +209,7 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
     const c = sessionCtx(ctx);
     const n = Math.min(Math.max(parseInt(((ctx.match as string) ?? "").trim() || "15", 10) || 15, 1), 50);
     const last = store.lastRunForSession(c.sessionId) as { id: string; input: string; status: string } | undefined;
-    if (!last) { await ctx.reply("no runs yet in this chat."); return; }
+    if (!last) { await ctx.reply("Belum ada run di chat ini"); return; }
     const calls = store.toolCallsForRun(last.id, n);
     const lines = [`🧾 last run (${last.id.slice(0, 8)}, ${last.status}):`, `input: ${last.input.slice(0, 150)}`, ""];
     if (calls.length === 0) lines.push("(no tool calls recorded)");
@@ -217,16 +224,16 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
     if (!authed(ctx)) return;
     const c = sessionCtx(ctx);
     const cp = store.latestCheckpoint(c.workspaceId) as { git_commit: string | null; created_at: string } | undefined;
-    if (!cp?.git_commit) { await ctx.reply("no checkpoint with a git commit yet — /undo needs a checkpoint created before big changes."); return; }
-    await ctx.reply(`⏪ restoring checkpoint from ${cp.created_at} (commit ${cp.git_commit.slice(0, 8)})…\nCurrent work is stashed first, so nothing is lost.`);
+    if (!cp?.git_commit) { await ctx.reply("Belum ada checkpoint nih — agent bikin checkpoint otomatis sebelum ubahan besar, coba lagi nanti"); return; }
+    await ctx.reply(`⏪ Balikin ke checkpoint ${cp.created_at} (<code>${cp.git_commit.slice(0, 8)}</code>) — kerjaan sekarang di-stash dulu biar aman`);
     const r = await rollbackToCommit(c.wsPath, cp.git_commit);
-    await ctx.reply(r.ok ? `✅ restored.\n${r.output.slice(0, 1500)}` : `❌ restore failed:\n${r.output.slice(0, 1500)}`);
+    await ctx.reply(r.ok ? `✅ Balik lagi — ${r.output.slice(0, 1500)}` : `❌ Gagal restore — ${r.output.slice(0, 1500)}`);
   });
 
   bot.command("approvals", async (ctx) => {
     if (!authed(ctx)) return;
     const list = store.pendingApprovals(20) as Array<{ id: string; tool: string; command: string; risk: string }>;
-    if (list.length === 0) { await ctx.reply("no pending approvals."); return; }
+    if (list.length === 0) { await ctx.reply("✅ Nggak ada yang nunggu approval"); return; }
     const lines = ["⚠️ pending approvals (reply /approve <id> or /reject <id>):", ""];
     for (const a of list) lines.push(`• \`${a.id.slice(0, 8)}\` [${a.risk}] ${a.tool}: ${a.command.slice(0, 100)}`);
     await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
@@ -235,9 +242,9 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
   const resolve = (status: "approved" | "rejected") => async (ctx: Context) => {
     if (!authed(ctx)) return;
     const prefix = ((ctx.match as string) ?? "").trim();
-    if (!prefix) { await ctx.reply(`usage: /${status} <id> — see /approvals`); return; }
+    if (!prefix) { await ctx.reply(`Pakai: <code>/${status} id</code> — lihat <code>/approvals</code> dulu`); return; }
     const id = store.resolveApprovalPrefix(prefix, status);
-    await ctx.reply(id ? (status === "approved" ? `✅ approved ${id.slice(0, 8)} — resuming…` : `❌ rejected ${id.slice(0, 8)} — agent will work around it.`) : "no unique pending approval matches that id — see /approvals");
+    await ctx.reply(id ? (status === "approved" ? `✅ approved ${id.slice(0, 8)} — resuming…` : `❌ rejected ${id.slice(0, 8)} — agent will work around it.`) : "ID nggak ketemu — cek <code>/approvals</code> ya");
   };
   bot.command("approve", resolve("approved"));
   bot.command("reject", resolve("rejected"));
@@ -259,15 +266,15 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
       const h = await checkHealth();
       const rows = Object.entries(h.detail ?? {}).map(([k, v]) => `${k}: ${v}`);
       await ctx.reply(`🩺 doctor — ${h.status}\n\ntelegram: ${h.telegram}\ndatabase: ${h.database}\nsandbox: ${h.sandbox}\nprovider: ${h.provider}\nworkspace: ${h.workspace}\npty: ${h.pty}\n\n${rows.join("\n")}`.slice(0, 3500));
-    } catch (e) { await ctx.reply(`doctor failed: ${String(e).slice(0, 500)}`); }
+    } catch (e) { await ctx.reply(`Doctor gagal — ${String(e).slice(0, 500)}`); }
   });
 
   bot.command("graph", async (ctx) => {
     if (!authed(ctx)) return;
     const q = ((ctx.match as string) ?? "").trim();
-    if (!q) { await ctx.reply("usage: /graph <question>\nexample: /graph what connects auth to the database?"); return; }
+    if (!q) { await ctx.reply("Pakai: <code>/graph pertanyaan</code>\nContoh: <code>/graph apa yang nyambungin auth ke database?</code>"); return; }
     const c = sessionCtx(ctx);
-    await ctx.reply("🔎 querying knowledge graph…");
+    await ctx.reply("🔎 Lagi tanya graph — bentar ya...");
     try {
       const { queryGraph } = await import("../integrations/graphify.js");
       const r = await queryGraph(c.wsPath, q);
@@ -275,7 +282,7 @@ export function setupBotCommands(bot: Bot, deps: { runText: (ctx: Context, text:
       const { text, truncated } = truncateForTelegram(out);
       await ctx.reply(text);
       if (truncated) await ctx.replyWithDocument(new InputFile(Buffer.from(out, "utf8"), "graph-result.txt"));
-    } catch (e) { await ctx.reply(`graph failed: ${String(e).slice(0, 500)}`); }
+    } catch (e) { await ctx.reply(`Graph gagal — ${String(e).slice(0, 500)}`); }
   });
 
   log.info({ event: "bot.commands", count: COMMANDS.length }, "slash commands registered");

@@ -8,7 +8,7 @@ describe("telegram renderer rules", () => {
     expect(renderEventLine({ type: "tool_start", tool: "read_file", args: { target: "src/auth.ts" } })).toContain("📖");
     expect(renderEventLine({ type: "tool_start", tool: "shell", args: { command: "npm test" } })).toContain("▶️");
     expect(renderEventLine({ type: "tool_start", tool: "edit_file", args: { target: "a" } })).toContain("🛠");
-    expect(renderEventLine({ type: "thinking", message: "x" })).toContain("🧠");
+    expect(renderEventLine({ type: "thinking", message: "x" })).toContain("✨");
   });
   it("status snapshot aggregation", () => {
     let s = emptySnapshot();
@@ -16,13 +16,13 @@ describe("telegram renderer rules", () => {
     s = applyEvent(s, { type: "file_change", files: ["a.ts"] });
     s = applyEvent(s, { type: "test", passed: 3, failed: 1, output: "x" });
     const msg = renderStatusMessage(s);
-    expect(msg).toContain("phase: testing");
-    expect(msg).toContain("files changed: 1");
-    expect(msg).toContain("errors: 1");
+    expect(msg).toContain("status: testing");
+    expect(msg).toContain("ubah: 1 file");
+    expect(msg).toContain("error: 1");
   });
   it("final + failure summaries", () => {
-    expect(renderFinalSummary({ filesChanged: ["a"], durationMs: 61000, tokens: 42800, model: "auto" })).toContain("task completed");
-    expect(renderFailure({ attempted: ["npm test"], lastError: "boom", remains: "todo" })).toContain("task incomplete");
+    expect(renderFinalSummary({ filesChanged: ["a"], durationMs: 61000, tokens: 42800, model: "auto" })).toContain("Beres!");
+    expect(renderFailure({ attempted: ["npm test"], lastError: "boom", remains: "todo" })).toContain("Belum beres");
   });
 });
 
