@@ -82,7 +82,9 @@ export class NativeRuntime implements AgentRuntime {
       ...chatHistory.slice(-12),
       { role: "user", content: input },
     ];
-    const toolSchemas = toolSchemasForLLM(this.registry);
+    // oc/muse-spark-*-free via 9router blocks tools (FreeTierError) — for pure chat don't send tools at all
+    const fullToolSchemas = toolSchemasForLLM(this.registry);
+    const toolSchemas = taskKind === "chat" ? [] : fullToolSchemas;
     const filesChanged: string[] = [];
     let tokensIn = 0; let tokensOut = 0;
     let done = false;
