@@ -1,0 +1,75 @@
+export enum RiskLevel { SAFE = "SAFE", LOW = "LOW", MEDIUM = "MEDIUM", HIGH = "HIGH", CRITICAL = "CRITICAL" }
+
+const TOOL_RISK: Record<string, RiskLevel> = {
+  read_file: RiskLevel.SAFE,
+  file_exists: RiskLevel.SAFE,
+  file_info: RiskLevel.SAFE,
+  list_directory: RiskLevel.SAFE,
+  find_files: RiskLevel.SAFE,
+  glob: RiskLevel.SAFE,
+  grep: RiskLevel.SAFE,
+  search_code: RiskLevel.SAFE,
+  git_diff: RiskLevel.SAFE,
+  git_status: RiskLevel.SAFE,
+  git_log: RiskLevel.SAFE,
+  write_file: RiskLevel.LOW,
+  edit_file: RiskLevel.LOW,
+  npm_test: RiskLevel.LOW,
+  shell_safe: RiskLevel.LOW,
+  http_get: RiskLevel.LOW,
+  npm_install: RiskLevel.MEDIUM,
+  pip_install: RiskLevel.MEDIUM,
+  git_commit: RiskLevel.MEDIUM,
+  git_checkout: RiskLevel.MEDIUM,
+  http_post: RiskLevel.MEDIUM,
+  docker_run: RiskLevel.MEDIUM,
+  git_push: RiskLevel.HIGH,
+  git_pull: RiskLevel.HIGH,
+  shell: RiskLevel.HIGH,
+  shell_start: RiskLevel.HIGH,
+  shell_input: RiskLevel.HIGH,
+  shell_kill: RiskLevel.HIGH,
+  process_kill: RiskLevel.HIGH,
+  checkpoint_restore: RiskLevel.HIGH,
+  read_many: RiskLevel.SAFE,
+  tree: RiskLevel.SAFE,
+  git_show: RiskLevel.SAFE,
+  shell_poll: RiskLevel.SAFE,
+  todo_write: RiskLevel.SAFE,
+  todo_list: RiskLevel.SAFE,
+  memory_recall: RiskLevel.SAFE,
+  project_profile: RiskLevel.SAFE,
+  env_info: RiskLevel.SAFE,
+  process_list: RiskLevel.SAFE,
+  graphify_status: RiskLevel.SAFE,
+  graphify_query: RiskLevel.SAFE,
+  graphify_path: RiskLevel.SAFE,
+  graphify_explain: RiskLevel.SAFE,
+  apply_patch: RiskLevel.LOW,
+  fetch_text: RiskLevel.LOW,
+  memory_remember: RiskLevel.LOW,
+  checkpoint_create: RiskLevel.LOW,
+  archive_extract: RiskLevel.MEDIUM,
+  git_branch: RiskLevel.MEDIUM,
+  graphify_build: RiskLevel.MEDIUM,
+};
+
+export function toolRisk(tool: string): RiskLevel {
+  return TOOL_RISK[tool] ?? RiskLevel.MEDIUM;
+}
+
+export type ApprovalDecision = "auto" | "ask" | "deny";
+
+export function policyForRisk(risk: RiskLevel, overrides?: Record<string, ApprovalDecision>): ApprovalDecision {
+  if (overrides) {
+    const v = overrides[risk.toLowerCase()];
+    if (v) return v;
+  }
+  switch (risk) {
+    case RiskLevel.SAFE:
+    case RiskLevel.LOW: return "auto";
+    case RiskLevel.MEDIUM:
+    case RiskLevel.HIGH: return "ask";
+    case RiskLevel.CRITICAL: return "deny";
+  }
+}

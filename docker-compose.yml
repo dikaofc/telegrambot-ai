@@ -1,0 +1,49 @@
+services:
+  teleagent:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: ./data/teleagent.db
+      WORKSPACE_ROOT: /workspaces
+    volumes:
+      - ./data:/app/data
+      - ./workspaces:/workspaces
+    ports:
+      - "49374:49374"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  sandbox-worker:
+    build:
+      context: .
+      dockerfile: docker/sandbox.Dockerfile
+    volumes:
+      - ./workspaces:/workspace
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: "2.0"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: teleagent
+      POSTGRES_PASSWORD: teleagent
+      POSTGRES_DB: teleagent
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

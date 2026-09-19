@@ -1,0 +1,40 @@
+{
+  "name": "teleagent",
+  "version": "1.0.0",
+  "description": "Telegram autonomous coding agent — multi-provider, PTY-backed, sandboxed",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "dev": "tsx --watch apps/bot/src/index.ts",
+    "dev:api": "tsx --watch apps/api/src/index.ts",
+    "dev:worker": "tsx --watch apps/worker/src/index.ts",
+    "tui": "tsx apps/tui/src/index.ts",
+    "start": "node dist/apps/bot/src/index.js",
+    "start:api": "node dist/apps/api/src/index.js",
+    "start:worker": "node dist/apps/worker/src/index.js",
+    "start:tui": "node dist/apps/tui/src/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "node scripts/lint.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.3.1",
+    "fastify": "^5.3.3",
+    "grammy": "^1.33.0",
+    "pino": "^9.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.3"
+  }
+}
