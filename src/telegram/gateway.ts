@@ -212,10 +212,12 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
     const handle = await startRun({ userId: dbUser, chatDbId: chatDb, sessionId, workspacePath: wsPath, provider: env.PROVIDER, model: env.DEFAULT_MODEL, input: text });
     try { await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, renderStatusMessage(snap), { reply_markup: { inline_keyboard: runControlsKeyboard(handle.runId) } })); } catch { /* noop */ }
     let tokens = 0;
+    let lastSummary = "";
     for await (const ev of handle.events) {
       snap = applyEvent(snap, ev);
       if (ev.type === "tool_start") attempted.push(`${ev.tool} ${JSON.stringify(ev.args).slice(0, 150)}`);
       if (ev.type === "file_change") filesChanged.push(...ev.files);
+      if (ev.type === "completed" && ev.summary) lastSummary = ev.summary;
       if (ev.type === "approval_required") {
         await ctx.reply(`⚠️ approval required\n\nagent wants to execute:\n\n${ev.command}\n\nrisk: ${ev.risk}\n\nreason:\n${ev.reason}`, { reply_markup: { inline_keyboard: approvalKeyboard(ev.approvalId) } });
       }
@@ -223,7 +225,9 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
       if (ev.type === "completed") tokens += 100;
     }
     const duration = Date.now() - started;
-    const finalText = renderFinalSummary({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL });
+    // Strip noisy git: suffix from pure chat answers (native-runtime appends git diff --stat)
+    if (lastSummary.includes("\n\ngit:\n")) lastSummary = lastSummary.split("\n\ngit:\n")[0].trim();
+    const finalText = renderFinalSummary({ filesChanged: [...new Set(filesChanged)], durationMs: duration, tokens, model: env.DEFAULT_MODEL, summary: lastSummary || undefined });
     const { text: safe, truncated } = truncateForTelegram(finalText);
     await withRetry(() => ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, safe, { reply_markup: { inline_keyboard: afterRunKeyboard(sessionId) } }));
     if (truncated) {

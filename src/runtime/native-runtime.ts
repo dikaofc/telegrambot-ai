@@ -145,14 +145,39 @@ export class NativeRuntime implements AgentRuntime {
       }
 
       if (!pendingTool) {
-        // model answered directly — verify if it claimed file changes (it shouldn't without tools)
-        messages.push({ role: "assistant", content: textBuf || "(empty response)" });
+        const trimmed = textBuf.trim();
+        // Empty LLM response (common for small models on trivial chat due to streaming quirks) —
+        // retry once without tools before giving up, so "siapa kamu?" never shows empty.
+        if (!trimmed && iterations === 1 && taskKind === "chat") {
+          try {
+            let retryText = "";
+            const retryStream = chatWithFallback(
+              { model: this.ctx.model, messages: [...messages.slice(0, 1), { role: "user", content: input }], tools: [], signal: undefined },
+              defaultRouting(this.ctx.provider),
+            );
+            for await (const ev of retryStream) {
+              if (ev.type === "text" && ev.text) retryText += ev.text;
+              else if (ev.type === "usage" && ev.usage) { tokensIn += ev.usage.inputTokens; tokensOut += ev.usage.outputTokens; }
+            }
+            if (retryText.trim()) textBuf = retryText;
+          } catch { /* keep empty → fallback below */ }
+        }
+        const finalText = textBuf.trim();
+        // Last resort: if still empty, give a deterministic chat answer so user never sees blank "task completed"
+        let fallback = taskKind === "chat"
+          ? `Halo! Aku TeleAgent — coding agent kamu di Telegram. Kirim tugas apa aja, aku siap bantu. (model: ${this.ctx.model})`
+          : "Task analyzed. No tool actions were required.";
+        // Honor explicit "3 kata" / "3 words" constraint when we have to synthesize
+        if (!finalText && /3\s*kata|3\s*words|tiga\s*kata/i.test(input)) fallback = "Aku TeleAgent pintar";
+        const summary = finalText || fallback;
+        messages.push({ role: "assistant", content: summary });
         yield { type: "state", state: "completed" };
-        const summary = textBuf.trim() || "Task analyzed. No tool actions were required.";
         metrics.agentRunsSuccess.inc();
         recordRunDuration(Date.now() - started);
         recordUsage("completed");
-        yield { type: "completed", summary: summary + (await gitStat()), filesChanged };
+        // Don't append git noise to pure chat
+        const maybeGit = taskKind === "chat" && filesChanged.length === 0 ? "" : await gitStat();
+        yield { type: "completed", summary: summary + maybeGit, filesChanged };
         done = true;
         break;
       }

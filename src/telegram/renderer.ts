@@ -80,10 +80,26 @@ export function renderStatusMessage(snap: StatusSnapshot): string {
   ].filter((l) => l !== undefined).join("\n");
 }
 
-export function renderFinalSummary(o: { filesChanged: string[]; testsPassed?: number; durationMs: number; tokens: number; model: string; verification?: string }): string {
+export function renderFinalSummary(o: { filesChanged: string[]; testsPassed?: number; durationMs: number; tokens: number; model: string; verification?: string; summary?: string }): string {
   const mins = Math.floor(o.durationMs / 60000);
   const secs = Math.floor((o.durationMs % 60000) / 1000);
+  const summaryBlock = o.summary?.trim() ? o.summary.trim().slice(0, 3500) : undefined;
+  // For pure chat (no files changed) show the LLM answer prominently at the top
+  if (summaryBlock && o.filesChanged.length === 0) {
+    return [
+      summaryBlock,
+      "",
+      "---",
+      `model: ${o.model} · ${mins}m ${secs}s · ${(o.tokens / 1000).toFixed(1)}k tokens`,
+      o.verification ? "" : undefined,
+      o.verification,
+    ].filter((l) => l !== undefined).join("\n");
+  }
   return [
+    summaryBlock ? summaryBlock : undefined,
+    summaryBlock ? "" : undefined,
+    summaryBlock ? "---" : undefined,
+    summaryBlock ? "" : undefined,
     "✅ task completed",
     "",
     `model: ${o.model}`,
