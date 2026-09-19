@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SQLInputValue } from "./db.js";
-import { getDb } from "./db.js";
+import { getDb, withSchemaRepair } from "./db.js";
 
 // Every read goes through withSchemaRepair: a database that lost a table (or was
 // opened once without the full migration) heals itself instead of 500ing the
