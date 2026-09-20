@@ -24,26 +24,61 @@ function needPaths(a: Record<string, unknown>, keys: string[]): string | null {
   return null;
 }
 
+/**
+ * Small models (and some providers) put values under sibling keys:
+ * {file|path|filename} instead of target, {text|body} instead of content,
+ * {cmd} instead of command. Normalize before validation so calls succeed
+ * instead of failing twice and burning minutes in retry loops.
+ */
+function pickArg(a: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const k of keys) {
+    const v = a[k];
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return undefined;
+}
+
+function normFileArgs(a: Record<string, unknown>): Record<string, unknown> {
+  const b: Record<string, unknown> = { ...a };
+  const target = pickArg(a, "target", "file", "path", "filename", "filepath");
+  if (target !== undefined) b.target = target;
+  const content = pickArg(a, "content", "text", "body", "data");
+  if (content !== undefined) b.content = content;
+  const src = pickArg(a, "src", "source", "from");
+  if (src !== undefined) b.src = src;
+  const dest = pickArg(a, "dest", "destination", "to", "targetPath");
+  if (dest !== undefined) b.dest = dest;
+  const cmd = pickArg(a, "command", "cmd");
+  if (cmd !== undefined) b.command = cmd;
+  return b;
+}
+
 export function buildRegistry(): Map<string, ToolDefinition> {
   const m = new Map<string, ToolDefinition>();
   const add = (d: ToolDefinition) => m.set(d.name, d);
 
   add(def("read_file", "Read a file inside the workspace", { target: "string" }, async (a, c) => {
+    a = normFileArgs(a);
     const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.readFile(c.workspacePath, String(a.target));
   }));
   add(def("write_file", "Write/create a file", { target: "string", content: "string" }, async (a, c) => {
+    a = normFileArgs(a);
     const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.writeFile(c.workspacePath, String(a.target), String(a.content ?? ""));
   }));
   add(def("edit_file", "Edit a file by exact string replacement", { target: "string", oldText: "string", newText: "string" }, async (a, c) => {
+    a = normFileArgs(a);
     const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.editFile(c.workspacePath, String(a.target), String(a.oldText), String(a.newText), Boolean(a.replaceAll));
   }));
   add(def("delete_file", "Delete a file", { target: "string" }, async (a, c) => {
+    a = normFileArgs(a);
     const e = needPaths(a, ["target"]); if (e) return { success: false, error: e }; return fsTools.deleteFile(c.workspacePath, String(a.target));
   }));
   add(def("move_file", "Move a file", { src: "string", dest: "string" }, async (a, c) => {
+    a = normFileArgs(a);
     const e = needPaths(a, ["src", "dest"]); if (e) return { success: false, error: e }; return fsTools.moveFile(c.workspacePath, String(a.src), String(a.dest));
   }));
   add(def("copy_file", "Copy a file", { src: "string", dest: "string" }, async (a, c) => {
+    a = normFileArgs(a);
     const e = needPaths(a, ["src", "dest"]); if (e) return { success: false, error: e }; return fsTools.copyFile(c.workspacePath, String(a.src), String(a.dest));
   }));
   add(def("list_directory", "List directory", { target: "string?" }, async (a, c) => fsTools.listDirectory(c.workspacePath, String(a.target ?? "."))));
@@ -54,6 +89,7 @@ export function buildRegistry(): Map<string, ToolDefinition> {
   add(def("grep", "Grep pattern", { pattern: "string" }, async (a, c) => grepCode(c.workspacePath, String(a.pattern))));
   add(def("search_code", "Search code (rg/grep)", { query: "string" }, async (a, c) => searchCode(c.workspacePath, String(a.query))));
   add(def("shell", "Execute shell command (policy-gated)", { command: "string", timeoutMs: "number?" }, async (a, c): Promise<ToolResult> => {
+    a = normFileArgs(a);
     if (typeof a.command !== "string" || !(a.command as string).trim()) return { success: false, error: "shell needs a non-empty 'command' string" };
     return execCommand(String(a.command), { cwd: c.workspacePath, timeoutMs: typeof a.timeoutMs === "number" ? a.timeoutMs as number : c.timeoutMs });
   }));

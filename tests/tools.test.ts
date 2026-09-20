@@ -52,6 +52,22 @@ describe("filesystem tools", () => {
     }
     expect(fs.existsSync(path.join(ws, "undefined"))).toBe(false);
   });
+  it("registry accepts sibling arg keys (file/path/text/cmd aliases)", async () => {
+    const reg = buildRegistry();
+    const ctx = { workspacePath: ws, runId: "t", sessionId: "t", userId: "t" };
+    const w = await reg.get("write_file")!.execute({ file: "alias.txt", text: "alias-ok" }, ctx);
+    expect(w.success).toBe(true);
+    expect(fs.readFileSync(path.join(ws, "alias.txt"), "utf8")).toBe("alias-ok");
+    const r = await reg.get("read_file")!.execute({ path: "alias.txt" }, ctx);
+    expect(r.success).toBe(true);
+    expect(r.output).toContain("alias-ok");
+    const s = await reg.get("shell")!.execute({ cmd: "echo alias-shell" }, ctx);
+    expect(s.success).toBe(true);
+    expect(s.output).toContain("alias-shell");
+    const mv = await reg.get("move_file")!.execute({ source: "alias.txt", destination: "alias2.txt" }, ctx);
+    expect(mv.success).toBe(true);
+    expect(fs.existsSync(path.join(ws, "alias2.txt"))).toBe(true);
+  });
 });
 
 describe("shell execution", () => {
