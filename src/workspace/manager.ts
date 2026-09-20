@@ -103,6 +103,10 @@ export function resolveWorkspacePath(nameOrPath: string): string {
   }
   const candidate = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw);
   const allowed = allowedRealRoots();
+  // The root itself is never a workspace (tools would span every workspace).
+  if (candidate === root) {
+    throw new Error("gunakan sub-workspace, bukan root — mis. /workspace default atau /workspace telegrambot-ai");
+  }
   if (!allowed.some((r) => insideRoot(candidate, r))) {
     throw new Error(`workspace escape denied: ${raw} is outside ${root} (mirror yang memang dipakai bisa diizinkan lewat WORKSPACE_EXTRA_ROOTS)`);
   }

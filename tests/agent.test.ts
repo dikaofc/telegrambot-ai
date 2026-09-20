@@ -11,6 +11,14 @@ import { checkHealth } from "../src/observability/health.js";
 import { renderPrometheus, metrics } from "../src/observability/metrics.js";
 
 describe("workspace management", () => {
+  it("rejects the workspace root itself as a workspace", () => {
+    process.env.WORKSPACE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "tele-wsroot2-"));
+    expect(() => resolveWorkspacePath("./")).toThrow();
+    expect(() => resolveWorkspacePath(".")).toThrow();
+    expect(() => resolveWorkspacePath("")).toThrow();
+    // but a real sub-workspace still resolves
+    expect(resolveWorkspacePath("my-project")).toContain("my-project");
+  });
   it("resolves + fuzzy matches + enforces boundary", () => {
     process.env.WORKSPACE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "tele-wsroot-"));
     fs.mkdirSync(path.join(process.env.WORKSPACE_ROOT, "my-project"));
