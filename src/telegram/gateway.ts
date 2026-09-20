@@ -412,7 +412,7 @@ async function runFastShell(
   catch { await withRetry(() => ctx.reply(text.replace(/<[^>]+>/g, ""))); }
 }
 
-async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
+export async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   const env = getEnv();
   const userId = ctx.from?.id;
   if (userId === undefined) return;
