@@ -76,6 +76,33 @@ export function parseNaturalSettings(text: string): { key: string; value: string
   return null;
 }
 
+/**
+ * Fast-path for trivial read-only shell one-liners ("ls -la", "pwd", "cat x").
+ * Returns the exact command to run, or null to fall through to the agent loop.
+ * Deliberately strict: single line, no chaining/substitution/redirection/globs.
+ */
+export function matchFastShellCommand(text: string): string | null {
+  const t = text.trim();
+  if (!t || t.length > 300 || /[\n\r;&|<>$`!\\*?~#(){}[\]]/.test(t)) return null;
+  const m = /^(ls|dir|pwd|whoami|date|echo|cat)\b\s*(.*)$/i.exec(t);
+  if (!m) return null;
+  const verb = m[1].toLowerCase();
+  const rest = (m[2] ?? "").trim();
+  if (verb === "cat") {
+    // one safe relative path only — no flags, no traversal, no absolute paths
+    if (!rest || /^-/.test(rest) || /\s/.test(rest)) return null;
+    if (rest.includes("..")) return null;
+    if (rest.startsWith("/")) return null;
+  } else if (verb === "echo") {
+    if (!rest) return null;
+  } else if (verb === "ls" || verb === "dir") {
+    if (rest && !/^[\w./\- ]+$/.test(rest)) return null;
+  } else if (rest) {
+    return null; // pwd/whoami/date take no arguments
+  }
+  return `${verb}${rest ? " " + rest : ""}`;
+}
+
 export function createBot(): Bot {
   const env = getEnv();
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is required");
@@ -358,6 +385,33 @@ async function handleControl(ctx: Context, control: "stop" | "pause" | "resume")
   }
 }
 
+async function runFastShell(
+  ctx: Context,
+  o: { dbUser: string; sessionId: string; wsPath: string; command: string; input: string },
+): Promise<void> {
+  const esc = (s: string): string => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const t0 = Date.now();
+  const { execCommand } = await import("../tools/shell.js");
+  const { auditTool } = await import("../security/audit.js");
+  const { truncateForTelegram } = await import("../utils/large-output.js");
+  store.addMessage(o.sessionId, "user", o.input);
+  let body: string;
+  try {
+    const r = await execCommand(o.command, { cwd: o.wsPath, timeoutMs: 30_000 });
+    auditTool({
+      userId: o.dbUser, sessionId: o.sessionId, tool: "shell",
+      args: { command: o.command, fastPath: true }, risk: "SAFE", approval: "auto",
+      result: r.output ?? r.error, exitCode: r.metadata?.exitCode, durationMs: Date.now() - t0,
+    });
+    body = r.success ? (r.output || "(empty)") : `❌ exit ${r.metadata?.exitCode ?? "?"}:\n${r.error ?? ""}`;
+    store.addMessage(o.sessionId, "assistant", body.slice(0, 8000));
+  } catch (e) { body = `❌ ${String(e).slice(0, 500)}`; }
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  const { text } = truncateForTelegram(`💻 <code>${esc(o.command)}</code>\n<pre>${esc(body.slice(0, 3500))}</pre>\n\n⏱ ${secs}s • langsung, tanpa token AI`);
+  try { await withRetry(() => ctx.reply(text, { parse_mode: "HTML" })); }
+  catch { await withRetry(() => ctx.reply(text.replace(/<[^>]+>/g, ""))); }
+}
+
 async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   const env = getEnv();
   const userId = ctx.from?.id;
@@ -381,6 +435,14 @@ async function runAgentForMessage(ctx: Context, text: string): Promise<void> {
   const wsPath = sessWs ?? resolveWorkspacePath("default");
   const runProvider = sess?.provider || env.PROVIDER;
   const runModel = sess?.model || env.DEFAULT_MODEL;
+
+  // Fast-path: trivial read-only shell one-liners run instantly with zero
+  // tokens instead of spinning the whole plan loop (fixes "ls -la takes forever").
+  const fast = matchFastShellCommand(text);
+  if (fast) {
+    await runFastShell(ctx, { dbUser, sessionId, wsPath, command: fast, input: text });
+    return;
+  }
 
   // live status message (aggregated + debounced edits)
   const statusMsg = await withRetry(() => ctx.reply("✨ Lagi dikerjain — bentar ya..."));

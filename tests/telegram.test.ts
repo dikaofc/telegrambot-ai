@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { renderEventLine, applyEvent, emptySnapshot, renderStatusMessage, renderFinalSummary, renderFailure } from "../src/telegram/renderer.js";
 import { truncateForTelegram, progressBar, splitMessage } from "../src/utils/large-output.js";
 import { runControlsKeyboard, approvalKeyboard, settingsKeyboard } from "../src/telegram/keyboards.js";
+import { matchFastShellCommand } from "../src/telegram/gateway.js";
 
 describe("telegram renderer rules", () => {
   it("maps tools to operational status (no raw CoT)", () => {
@@ -42,5 +43,24 @@ describe("keyboards", () => {
     expect(runControlsKeyboard("r")[0]?.length).toBe(3);
     expect(approvalKeyboard("a")[0]?.length).toBe(2);
     expect(settingsKeyboard().length).toBeGreaterThan(2);
+  });
+});
+
+describe("fast shell path (ls -la must never enter the plan loop)", () => {
+  it("accepts trivial read-only one-liners", () => {
+    expect(matchFastShellCommand("ls -la")).toBe("ls -la");
+    expect(matchFastShellCommand("ls")).toBe("ls");
+    expect(matchFastShellCommand("pwd")).toBe("pwd");
+    expect(matchFastShellCommand("whoami")).toBe("whoami");
+    expect(matchFastShellCommand("echo halo")).toBe("echo halo");
+    expect(matchFastShellCommand("cat dika.js")).toBe("cat dika.js");
+    expect(matchFastShellCommand("cat uploads/a.txt")).toBe("cat uploads/a.txt");
+  });
+  it("rejects everything else (falls through to the agent)", () => {
+    for (const t of [
+      "rm -rf /", "ls -la; rm -rf /", "ls | grep x", "cat ../../etc/passwd",
+      "cat /etc/passwd", "cat a b", "tolong ls", "coba ketik ls -la",
+      "ls $HOME", "echo `whoami`", "git status", "npm test", "",
+    ]) expect(matchFastShellCommand(t), t).toBeNull();
   });
 });
