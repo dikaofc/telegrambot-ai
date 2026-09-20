@@ -19,6 +19,9 @@ export async function buildApiServer() {
   const app = Fastify({ logger: false });
   await app.register(websocket);
 
+  // Failed API-key attempts per IP (brute-force brake for short PINs).
+  const authFails = new Map<string, { fails: number; windowStart: number; blockedUntil: number }>();
+
   const isLoopback = (ip?: string): boolean => {
     if (!ip) return false;
     const v = ip.replace(/^::ffff:/i, "");
@@ -27,11 +30,30 @@ export async function buildApiServer() {
 
   const auth = async (req: { headers: Record<string, string | string[] | undefined>; ip?: string }, reply: { code(n: number): { send(x: unknown): void } }): Promise<boolean> => {
     if (env.TELEAGENT_API_KEY) {
+      const ip = req.ip ?? "unknown";
+      const bucket = authFails.get(ip);
+      if (bucket && Date.now() < bucket.blockedUntil) {
+        reply.code(429).send({ error: "too many wrong attempts — try again later" });
+        return false;
+      }
       const rawAuth = req.headers.authorization;
       const authStr = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
       const keyHdr = req.headers["x-api-key"];
       const key = (Array.isArray(keyHdr) ? keyHdr[0] : keyHdr) ?? authStr?.replace("Bearer ", "");
-      if (key !== env.TELEAGENT_API_KEY) { reply.code(401).send({ error: "unauthorized" }); return false; }
+      if (key !== env.TELEAGENT_API_KEY) {
+        // Brute-force brake: 10 wrong tries from one IP = 15 min block.
+        // This is what makes a short 6-digit PIN viable.
+        const now = Date.now();
+        const b = authFails.get(ip) ?? { fails: 0, windowStart: now, blockedUntil: 0 };
+        if (now - b.windowStart > 5 * 60_000) { b.fails = 0; b.windowStart = now; }
+        b.fails += 1;
+        if (b.fails >= 10) b.blockedUntil = now + 15 * 60_000;
+        authFails.set(ip, b);
+        if (authFails.size > 1000) authFails.delete(authFails.keys().next().value as string);
+        reply.code(401).send({ error: "unauthorized" });
+        return false;
+      }
+      authFails.delete(ip);
       return true;
     }
     // No API key configured: trust loopback (local dashboard / dev) only.
@@ -331,7 +353,12 @@ export async function buildApiServer() {
   app.get("/api/provider-config", async (req, reply) => {
     if (!(await gate(req as never, reply as never))) return;
     const env = getEnv();
-    const mask = (s: string) => s ? s.slice(0, 6) + "****" + s.slice(-4) : "";
+    const mask = (s: string) => {
+      if (!s) return "";
+      // Short secrets (e.g. 6-digit PIN) must never be partially revealed.
+      if (s.length <= 10) return "•".repeat(s.length);
+      return s.slice(0, 6) + "****" + s.slice(-4);
+    };
     return {
       provider: env.PROVIDER,
       baseUrl: env.PROVIDER_BASE_URL,

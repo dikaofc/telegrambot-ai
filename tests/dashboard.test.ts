@@ -94,4 +94,20 @@ describe("dashboard", () => {
 
     await app.close();
   }, 60000);
+
+  it("6-digit PIN works + brute force gets braked", async () => {
+    process.env.TELEAGENT_API_KEY = "482910";
+    const app = await buildApiServer();
+    const good = (extra = {}) => app.inject({ method: "GET", url: "/api/sessions?limit=1", headers: { "x-api-key": "482910" }, ...extra });
+    const bad = () => app.inject({ method: "GET", url: "/api/sessions?limit=1", headers: { "x-api-key": "000000" } });
+    expect((await good()).statusCode).toBe(200);
+    for (let i = 0; i < 9; i++) expect((await bad()).statusCode).toBe(401);
+    // 10th wrong try still 401, 11th hits the brake
+    expect((await bad()).statusCode).toBe(401);
+    expect((await bad()).statusCode).toBe(429);
+    // correct PIN still rejected while blocked, works after failures reset
+    expect((await good()).statusCode).toBe(429);
+    await app.close();
+    process.env.TELEAGENT_API_KEY = "";
+  }, 60000);
 });
