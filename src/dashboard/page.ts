@@ -337,6 +337,7 @@ function shortId(id){return '<span class="mono">'+esc(String(id||"").slice(0,8))
 async function api(path,opts){
   opts=opts||{};
   const r=await fetch(path,Object.assign({},opts,{headers:Object.assign({},opts.headers||{},{"content-type":"application/json","x-api-key":key()})}));
+  if(r.status===401)throw new Error("🔑 API key belum diisi/belum benar — masukkan key di kanan atas lalu SAVE.");
   if(!r.ok)throw new Error("HTTP "+r.status+": "+(await r.text()).slice(0,300));
   return r.json();
 }

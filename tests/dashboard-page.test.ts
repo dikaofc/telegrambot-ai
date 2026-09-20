@@ -80,6 +80,26 @@ describe("dashboard page never blank", () => {
     expect(html).toContain('property="og:title"');
     expect(html).toContain('<img src="/logo.svg"');
   });
+  it("asks for the API key instead of raw 401 text", async () => {
+    const { el, sandbox } = await bootDashboard();
+    (sandbox.go as (t: string) => void)("Graphify");
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    // harness fetch is authed (ok:true); simulate the unauthenticated browser
+    // by calling the page's api() against a 401 stub directly
+    const src = extractScript();
+    const apiSrc = src.slice(src.indexOf("function key()"), src.indexOf("const VIEWS="));
+    const box: Record<string, unknown> = {
+      console, URL, encodeURIComponent,
+      localStorage: { getItem: () => "", setItem: () => {} },
+      fetch: async () => ({ ok: false, status: 401, text: async () => '{"error":"unauthorized"}' }),
+    };
+    box.globalThis = box;
+    vm.createContext(box);
+    vm.runInContext(apiSrc + "\nthis.__out = null; api('/api/graphify/status').catch(e => { this.__out = String(e && e.message || e); });", box);
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    expect(String((box as { __out?: string }).__out ?? "")).toContain("API key");
+    expect(el("view").innerHTML).toContain("Knowledge Graph");
+  });
   it("boots: tabs render, status pill updates, Status view fills", async () => {
     const { el } = await bootDashboard();
     const tabs = String(el("tabs").innerHTML);
