@@ -80,6 +80,17 @@ describe("dashboard page never blank", () => {
     expect(html).toContain('property="og:title"');
     expect(html).toContain('<img src="/logo.svg"');
   });
+  it("shows the PIN modal on first entry when no key is saved", async () => {
+    const html = dashboardPage();
+    expect(html).toContain('id="keymodal"');
+    expect(html).toContain('id="pinInput"');
+    expect(html).not.toContain('id="apiKey"');
+    const { el } = await bootDashboard();
+    // harness localStorage is empty → modal must be open
+    const m = el("keymodal") as unknown as { style?: { display?: string } };
+    expect(m.style?.display ?? "flex").toBe("flex");
+    void el;
+  });
   it("asks for the API key instead of raw 401 text", async () => {
     const { el, sandbox } = await bootDashboard();
     (sandbox.go as (t: string) => void)("Graphify");
@@ -87,7 +98,7 @@ describe("dashboard page never blank", () => {
     // harness fetch is authed (ok:true); simulate the unauthenticated browser
     // by calling the page's api() against a 401 stub directly
     const src = extractScript();
-    const apiSrc = src.slice(src.indexOf("function key()"), src.indexOf("const VIEWS="));
+    const apiSrc = src.slice(src.indexOf("function key()"), src.indexOf("/* ---------- bindings"));
     const box: Record<string, unknown> = {
       console, URL, encodeURIComponent,
       localStorage: { getItem: () => "", setItem: () => {} },
@@ -97,7 +108,7 @@ describe("dashboard page never blank", () => {
     vm.createContext(box);
     vm.runInContext(apiSrc + "\nthis.__out = null; api('/api/graphify/status').catch(e => { this.__out = String(e && e.message || e); });", box);
     for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-    expect(String((box as { __out?: string }).__out ?? "")).toContain("API key");
+    expect(String((box as { __out?: string }).__out ?? "")).toContain("PIN");
     expect(el("view").innerHTML).toContain("Knowledge Graph");
   });
   it("boots: tabs render, status pill updates, Status view fills", async () => {

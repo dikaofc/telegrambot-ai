@@ -20,7 +20,8 @@ describe("dashboard", () => {
     for (const tab of ["Status", "Sessions", "Runs", "Approvals", "Workspaces", "Providers", "Usage", "Audit", "Settings", "Graphify"]) {
       expect(html).toContain(tab);
     }
-    expect(html).toContain("apiKey");
+    expect(html).toContain("keymodal");
+    expect(html).toContain("pinInput");
   });
 
   it("status + resource endpoints work end to end", async () => {

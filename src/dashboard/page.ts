@@ -228,6 +228,14 @@ svg.graph{width:100%;height:auto;display:block;background:var(--surface-2);borde
 
 /* ---------- footer ---------- */
 .foot{color:var(--muted);font-size:12px;text-align:center;padding:6px 14px 28px}
+.overlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(10,14,25,.55);padding:20px}
+.overlay.open{display:flex}
+.modal{width:min(360px,100%);background:var(--surface);color:var(--text);border-radius:18px;padding:24px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.modal h2{margin:0 0 4px;font-size:19px}
+.modal .sub{margin-bottom:16px}
+.modal input{text-align:center;font-size:22px;letter-spacing:8px;font-weight:700}
+.modal .err{min-height:20px;color:var(--bad);font-size:13px;font-weight:600;margin-top:8px}
+.modal .skip{background:none;border:0;color:var(--muted);font:inherit;font-size:13px;margin-top:10px;cursor:pointer;text-decoration:underline}
 .foot code{font-size:11.5px}
 
 /* ---------- tablet ---------- */
@@ -337,7 +345,7 @@ function shortId(id){return '<span class="mono">'+esc(String(id||"").slice(0,8))
 async function api(path,opts){
   opts=opts||{};
   const r=await fetch(path,Object.assign({},opts,{headers:Object.assign({},opts.headers||{},{"content-type":"application/json","x-api-key":key()})}));
-  if(r.status===401)throw new Error("🔑 API key belum diisi/belum benar — masukkan key di kanan atas lalu SAVE.");
+  if(r.status===401){showKeyModal("PIN salah/belum diisi — masukkan PIN lalu Masuk.");throw new Error("🔑 PIN salah/belum diisi — masukkan PIN lalu Masuk.");}
   if(!r.ok)throw new Error("HTTP "+r.status+": "+(await r.text()).slice(0,300));
   return r.json();
 }
@@ -600,7 +608,9 @@ async function saveProvider(){
     schedule(refresh,900);
   }catch(e){if(msg)msg.textContent="Gagal: "+e.message}
 }
-function saveKey(){try{localStorage.setItem("teleagent_key",$("apiKey").value)}catch(e){}refresh()}
+function showKeyModal(msg){try{const m=$("keymodal");if(!m)return;if(m.classList)m.classList.add("open");else m.style.display="flex";const e=$("pinErr");if(e)e.textContent=msg||"";const i=$("pinInput");if(i&&i.focus)i.focus()}catch(e){}}
+function hideKeyModal(){try{const m=$("keymodal");if(!m)return;if(m.classList)m.classList.remove("open");else m.style.display="none"}catch(e){}}
+function savePin(){try{const i=$("pinInput");const v=i?String(i.value||"").trim():"";const e=$("pinErr");if(v.length<4){if(e)e.textContent="PIN minimal 4 karakter.";return}localStorage.setItem("teleagent_key",v);if(i)i.value="";hideKeyModal();refresh()}catch(e){}}
 
 /* ---------- bindings ---------- */
 function bind(id,evt,fn){try{const el=$(id);if(el&&el.addEventListener)el.addEventListener(evt,fn)}catch(e){}}
@@ -629,7 +639,9 @@ function onEvent(ev){
   if(ev.preventDefault&&actEl.tagName==="A")ev.preventDefault();
   switch(act){
     case "refresh":refresh();break;
-    case "save-key":saveKey();break;
+    case "key":showKeyModal();break;
+    case "save-pin":savePin();break;
+    case "skip-pin":hideKeyModal();break;
     case "theme":toggleTheme();break;
     case "stop-run":stopRun(id);break;
     case "approve":resolveAppr(id,"approved");break;
@@ -650,7 +662,9 @@ function onEvent(ev){
 /* ---------- boot ---------- */
 applyTheme(storedTheme());
 setTitle();
-try{if($("apiKey"))$("apiKey").value=key()}catch(e){}
+bind("pinInput","input",function(){try{const i=$("pinInput");if(i&&String(i.value||"").length>=6)savePin()}catch(e){}});
+bind("pinInput","keydown",function(ev){try{if(ev&&ev.key==="Enter")savePin()}catch(e){}});
+if(!key())showKeyModal();
 try{if(typeof document!=="undefined"&&document.addEventListener){document.addEventListener("click",onEvent)} }catch(e){}
 try{if(typeof window!=="undefined"&&window.addEventListener){window.addEventListener("popstate",function(){const t=tabFromPath(location.pathname);if(t!==cur){cur=t;setTitle();refresh()}})} }catch(e){}
 try{if(typeof document!=="undefined"&&document.addEventListener){document.addEventListener("visibilitychange",function(){if(!document.hidden)refresh()})} }catch(e){}
@@ -693,9 +707,8 @@ ${BASE_CSS}
       <span class="pill" id="p-runs">…</span>
     </div>
     <div class="actions">
-      <input id="apiKey" type="password" placeholder="API key" aria-label="API key" autocomplete="off">
-      <button class="btn" data-action="save-key" type="button">Save</button>
       <button class="btn" data-action="refresh" type="button">Refresh</button>
+      <button class="btn" data-action="key" type="button">PIN</button>
       <button class="btn icon" data-action="theme" type="button" title="Ganti tema" aria-label="Ganti tema">
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.4 10.1A5.8 5.8 0 0 1 5.9 2.6 5.9 5.9 0 1 0 13.4 10.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       </button>
@@ -704,6 +717,16 @@ ${BASE_CSS}
   <nav id="tabs" class="tabs" role="tablist" aria-label="Bagian dashboard"></nav>
 </div>
 <main id="view" class="view" role="tabpanel" aria-live="polite"></main>
+<div class="overlay" id="keymodal" role="dialog" aria-modal="true" aria-labelledby="keymodal-title">
+  <div class="modal">
+    <h2 id="keymodal-title">Masuk Dashboard</h2>
+    <div class="sub">Masukkan PIN 6 digit untuk membuka semua tab.</div>
+    <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" maxlength="64" placeholder="••••••" aria-label="PIN dashboard">
+    <div class="err" id="pinErr"></div>
+    <div class="row" style="justify-content:center;margin-top:12px"><button class="btn primary" data-action="save-pin" type="button">Masuk</button></div>
+    <button class="skip" data-action="skip-pin" type="button">Lewati dulu (cuma Status)</button>
+  </div>
+</div>
 <footer class="foot">TeleAgent · <code>/api/status</code> publik · <code>/api/doctor</code> untuk diagnosa lengkap</footer>
 <script>
 ${SCRIPT}</script>
