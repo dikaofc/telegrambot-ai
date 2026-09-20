@@ -63,11 +63,21 @@ async function checkProvider(): Promise<DoctorCheck[]> {
   const out: DoctorCheck[] = [];
   try {
     const p = createProvider(env.PROVIDER);
-    const healthy = await withTimeout(p.health(), 10_000, "provider health");
-    const models = healthy ? await withTimeout(p.models(), 10_000, "provider models").catch(() => [] as string[]) : [];
+    // One retry: upstreams flap (401 bursts, queue-full 429s). Two consecutive
+    // failures = genuinely down, not a blip.
+    let healthy = false;
+    let models: string[] = [];
+    let lastErr = "";
+    for (let attempt = 0; attempt < 2 && !healthy; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
+      try {
+        healthy = await withTimeout(p.health(), 10_000, "provider health");
+        if (healthy) models = await withTimeout(p.models(), 10_000, "provider models").catch(() => [] as string[]);
+      } catch (e) { lastErr = String(e).slice(0, 160); }
+    }
     out.push(healthy
       ? { name: "provider", status: "pass", detail: `${env.PROVIDER} reachable, ${models.length} models` }
-      : { name: "provider", status: "fail", detail: `${env.PROVIDER} unreachable`, hint: "cek PROVIDER_API_KEY / PROVIDER_BASE_URL / /providers" });
+      : { name: "provider", status: "fail", detail: `${env.PROVIDER} unreachable${lastErr ? ` (${lastErr})` : ""}`, hint: "cek PROVIDER_API_KEY / PROVIDER_BASE_URL / /providers" });
   } catch (e) {
     out.push({ name: "provider", status: "fail", detail: String(e).slice(0, 200), hint: "cek PROVIDER_API_KEY / PROVIDER_BASE_URL" });
   }
