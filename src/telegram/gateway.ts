@@ -80,9 +80,18 @@ export function parseNaturalSettings(text: string): { key: string; value: string
  * Fast-path for trivial read-only shell one-liners ("ls -la", "pwd", "cat x").
  * Returns the exact command to run, or null to fall through to the agent loop.
  * Deliberately strict: single line, no chaining/substitution/redirection/globs.
+ * A leading action verb ("jalankan ls -la") is stripped first.
  */
+const FAST_LEAD = /^(?:jalankan|jalanin|eksekusi|run|execute|coba|tolong|ketik)\s+/i;
+
 export function matchFastShellCommand(text: string): string | null {
-  const t = text.trim();
+  let t = text.trim();
+  // strip at most two leading action verbs ("coba ketik ls -la")
+  for (let i = 0; i < 2; i++) {
+    const s = t.replace(FAST_LEAD, "");
+    if (s === t) break;
+    t = s.trim();
+  }
   if (!t || t.length > 300 || /[\n\r;&|<>$`!\\*?~#(){}[\]]/.test(t)) return null;
   const m = /^(ls|dir|pwd|whoami|date|echo|cat)\b\s*(.*)$/i.exec(t);
   if (!m) return null;

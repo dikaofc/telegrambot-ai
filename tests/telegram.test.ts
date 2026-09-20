@@ -55,12 +55,18 @@ describe("fast shell path (ls -la must never enter the plan loop)", () => {
     expect(matchFastShellCommand("echo halo")).toBe("echo halo");
     expect(matchFastShellCommand("cat dika.js")).toBe("cat dika.js");
     expect(matchFastShellCommand("cat uploads/a.txt")).toBe("cat uploads/a.txt");
+    expect(matchFastShellCommand("jalankan ls -la")).toBe("ls -la");
+    expect(matchFastShellCommand("jalanin pwd")).toBe("pwd");
+    expect(matchFastShellCommand("coba ketik ls -la")).toBe("ls -la");
+    expect(matchFastShellCommand("tolong cat dika.js")).toBe("cat dika.js");
+    expect(matchFastShellCommand("tolong ls")).toBe("ls");
   });
   it("rejects everything else (falls through to the agent)", () => {
     for (const t of [
       "rm -rf /", "ls -la; rm -rf /", "ls | grep x", "cat ../../etc/passwd",
-      "cat /etc/passwd", "cat a b", "tolong ls", "coba ketik ls -la",
+      "cat /etc/passwd", "cat a b", "tolong hapus file",
       "ls $HOME", "echo `whoami`", "git status", "npm test", "",
+      "jalankan rm -rf /", "coba ketik rm -rf /",
     ]) expect(matchFastShellCommand(t), t).toBeNull();
   });
 });
